@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Performance Reference - Combined View | Finovate</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="main-container">
+    <div class="document-header">
+        <div class="header-content">
+            <div>
+                <h1>LLM Inference Performance Reference</h1>
+                <p class="subtitle">Enterprise-grade performance metrics for Arabic-capable and general-purpose language models<br>
+                Comprehensive benchmarks for models under 70B parameters with real-world deployment insights</p>
+            </div>
+            <div class="logo-container">
+                <img src="https://finov8.ai/wp-content/uploads/2025/07/Finovate-Logo_White.png" alt="Finovate Logo">
+            </div>
+        </div>
+    </div>
+
+    <div class="content-wrapper">
+        <div class="controls">
+            <h2>Configuration Settings</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px;">
+                <div class="control-group">
+                    <label for="hardware">🖥️ Hardware Configuration</label>
+                    <select id="hardware" onchange="updateViews()">
+                        <option value="cpu_gold">Intel Xeon Gold 6338 (32C/64T, 512GB RAM)</option>
+                        <option value="cpu_platinum">Intel Xeon Platinum 8368 (48C/96T, 1TB RAM)</option>
+                        <option value="a5000">NVIDIA A5000 24GB GPU</option>
+                        <option value="a6000">NVIDIA A6000 48GB GPU</option>
+                        <option value="a100_40">NVIDIA A100 40GB GPU</option>
+                        <option value="a100_80" selected>NVIDIA A100 80GB GPU (Recommended)</option>
+                        <option value="h100_80">NVIDIA H100 80GB GPU (High Performance)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="quantization">⚡ Quantization Level</label>
+                    <select id="quantization" onchange="updateViews()">
+                        <option value="fp16">FP16 (Full Precision - Highest Quality)</option>
+                        <option value="int8">INT8 (Balanced - Good Quality)</option>
+                        <option value="q4_k_s">Q4_K_S (Optimized - CPU Compatible)</option>
+                        <option value="int4" selected>INT4 (Optimized - Best Performance)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="metric">📊 Metric to Display (Chart)</label>
+                    <select id="metric" onchange="updateViews()">
+                        <option value="throughput" selected>Throughput (tokens/sec)</option>
+                        <option value="latency">Latency (ms)</option>
+                        <option value="ttft">TTFT (ms)</option>
+                        <option value="users">Concurrent Users</option>
+                        <option value="batch">Batch Size</option>
+                        <option value="vram">VRAM/RAM (GB)</option>
+                        <option value="context">Context Window</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <div>
+                <strong>Performance Impact:</strong> Current configuration uses <span id="quantInfo"></span> quantization, 
+                providing <strong id="speedBoost"></strong> throughput boost and reducing VRAM usage to <strong id="vramReduction"></strong> of FP16 baseline, 
+                with <strong id="qualityImpact"></strong>.
+            </div>
+        </div>
+
+        <div class="view-toggle">
+            <button id="tableBtn" class="active" onclick="showTable()">Table View</button>
+            <button id="chartBtn" onclick="showChart()">Chart View</button>
+            <button id="calcBtn" onclick="showCalculator()">Performance Calculator</button>
+        </div>
+
+        <div id="tableView" class="view-section">
+            <div class="table-container">
+                <table id="perfTable">
+                    <thead>
+                        <tr>
+                            <th>Models<small>Available Options</small></th>
+                            <th>Parameters<small>Size Range</small></th>
+                            <th>VRAM<small>Memory (GB)</small></th>
+                            <th>Throughput<small>tokens/sec</small></th>
+                            <th>Latency<small>milliseconds</small></th>
+                            <th>TTFT<small>First Token (ms)</small></th>
+                            <th>Users<small>Concurrent</small></th>
+                            <th>Batch<small>Size</small></th>
+                            <th>Context<small>Window</small></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="chartView" class="view-section" style="display: none;">
+            <div class="chart-container">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+
+        <div id="calculatorView" class="view-section" style="display: none;">
+            <div class="calculator-panel">
+                <h2 style="color: #1e3a8a; margin-bottom: 20px;">⚡ LLM Performance & Capacity Planning Suite</h2>
+                
+                <div class="calc-grid">
+                    <div class="calc-input-panel">
+                        <h3>⚙️ Hardware Configuration</h3>
+                        
+                        <div class="input-group">
+                            <label for="calc_model">Model</label>
+                            <select id="calc_model" onchange="updateCalculator()">
+                                <option value="3.8,3.8B">Phi-3 Mini (3.8B)</option>
+                                <option value="7,7B">Mistral 7B</option>
+                                <option value="8,8B">Llama 3.1 8B</option>
+                                <option value="7,7B">Qwen 2.5 7B</option>
+                                <option value="9,9B">Gemma 2 9B</option>
+                                <option value="13,13B">Jais 13B (Arabic)</option>
+                                <option value="13,13B">Llama 2 13B</option>
+                                <option value="13,13B">Llama 3.1 13B</option>
+                                <option value="14,14B">DeepSeek 14B</option>
+                                <option value="27,27B">Gemma 2 27B</option>
+                                <option value="32,32B">Qwen 2.5 32B</option>
+                                <option value="34,34B">CodeLlama 34B</option>
+                                <option value="46.7,46.7B">Mixtral 8x7B (46.7B)</option>
+                                <option value="70,70B" selected>Llama 3.1 70B</option>
+                                <option value="72,72B">Qwen 2.5 72B</option>
+                                <option value="405,405B">Llama 3.1 405B</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="calc_hardware">Hardware</label>
+                            <select id="calc_hardware" onchange="updateCalculator()">
+                                <optgroup label="NVIDIA H100">
+                                    <option value="989" data-quant="fp16">H100 FP16 (989 TFLOPS)</option>
+                                    <option value="1979" data-quant="int8" selected>H100 INT8 (1979 TOPS)</option>
+                                    <option value="3958" data-quant="int4">H100 INT4 (3958 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA H200">
+                                    <option value="1248" data-quant="fp16">H200 FP16 (1248 TFLOPS)</option>
+                                    <option value="2496" data-quant="int8">H200 INT8 (2496 TOPS)</option>
+                                    <option value="4992" data-quant="int4">H200 INT4 (4992 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A100 80GB">
+                                    <option value="312" data-quant="fp16">A100 80GB FP16 (312 TFLOPS)</option>
+                                    <option value="624" data-quant="int8">A100 80GB INT8 (624 TOPS)</option>
+                                    <option value="1248" data-quant="int4">A100 80GB INT4 (1248 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A100 40GB">
+                                    <option value="156" data-quant="fp16">A100 40GB FP16 (156 TFLOPS)</option>
+                                    <option value="312" data-quant="int8">A100 40GB INT8 (312 TOPS)</option>
+                                    <option value="624" data-quant="int4">A100 40GB INT4 (624 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A6000">
+                                    <option value="77.4" data-quant="fp16">A6000 FP16 (77.4 TFLOPS)</option>
+                                    <option value="154.8" data-quant="int8">A6000 INT8 (154.8 TOPS)</option>
+                                    <option value="309.6" data-quant="int4">A6000 INT4 (309.6 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A5000">
+                                    <option value="65" data-quant="fp16">A5000 FP16 (65 TFLOPS)</option>
+                                    <option value="130" data-quant="int8">A5000 INT8 (130 TOPS)</option>
+                                    <option value="260" data-quant="int4">A5000 INT4 (260 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA RTX 6000 Ada">
+                                    <option value="127" data-quant="fp16">RTX 6000 Ada FP16 (127 TFLOPS)</option>
+                                    <option value="254" data-quant="int8">RTX 6000 Ada INT8 (254 TOPS)</option>
+                                    <option value="508" data-quant="int4">RTX 6000 Ada INT4 (508 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA L40S">
+                                    <option value="80" data-quant="fp16">L40S FP16 (80 TFLOPS)</option>
+                                    <option value="160" data-quant="int8">L40S INT8 (160 TOPS)</option>
+                                    <option value="320" data-quant="int4">L40S INT4 (320 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="AMD MI300X">
+                                    <option value="326.5" data-quant="fp16">MI300X FP16 (326.5 TFLOPS)</option>
+                                    <option value="653" data-quant="int8">MI300X INT8 (653 TOPS)</option>
+                                    <option value="1306" data-quant="int4">MI300X INT4 (1306 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="AMD MI250X">
+                                    <option value="191.5" data-quant="fp16">MI250X FP16 (191.5 TFLOPS)</option>
+                                    <option value="383" data-quant="int8">MI250X INT8 (383 TOPS)</option>
+                                    <option value="766" data-quant="int4">MI250X INT4 (766 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="AMD MI210">
+                                    <option value="92.5" data-quant="fp16">MI210 FP16 (92.5 TFLOPS)</option>
+                                    <option value="185" data-quant="int8">MI210 INT8 (185 TOPS)</option>
+                                    <option value="370" data-quant="int4">MI210 INT4 (370 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Intel Gaudi 3">
+                                    <option value="918" data-quant="fp16">Gaudi 3 BF16 (918 TFLOPS)</option>
+                                    <option value="1835" data-quant="int8">Gaudi 3 INT8 (1835 TOPS)</option>
+                                    <option value="3670" data-quant="int4">Gaudi 3 INT4 (3670 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Intel Gaudi 2">
+                                    <option value="432" data-quant="fp16">Gaudi 2 BF16 (432 TFLOPS)</option>
+                                    <option value="865" data-quant="int8">Gaudi 2 INT8 (865 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Google TPU v5e">
+                                    <option value="275" data-quant="fp16">TPU v5e BF16 (275 TFLOPS)</option>
+                                    <option value="550" data-quant="int8">TPU v5e INT8 (550 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Google TPU v4">
+                                    <option value="123" data-quant="fp16">TPU v4 BF16 (123 TFLOPS)</option>
+                                    <option value="246" data-quant="int8">TPU v4 INT8 (246 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Intel Xeon Platinum 8368">
+                                    <option value="3.5" data-quant="fp16">Xeon Platinum 8368 (3.5 TFLOPS)</option>
+                                </optgroup>
+                                <optgroup label="Intel Xeon Gold 6338">
+                                    <option value="2.8" data-quant="fp16">Xeon Gold 6338 (2.8 TFLOPS)</option>
+                                </optgroup>
+                                <optgroup label="AMD EPYC 9654">
+                                    <option value="4.2" data-quant="fp16">EPYC 9654 (4.2 TFLOPS)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="calc_util">Utilization Factor</label>
+                            <input type="number" id="calc_util" value="0.35" step="0.05" min="0.1" max="0.9" onchange="updateCalculator()">
+                            <small>Typical: 0.25-0.40</small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="calc_input">Avg Input Length (tokens)</label>
+                            <input type="number" id="calc_input" value="50" step="10" min="1" onchange="updateCalculator()">
+                            <small>Typical prompts: 50-200, Long context: 1000+</small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="calc_response">Avg Response Length (tokens)</label>
+                            <input type="number" id="calc_response" value="200" step="10" min="10" onchange="updateCalculator()">
+                        </div>
+
+                        <div class="input-group">
+                            <label for="calc_think">Think Time (seconds)</label>
+                            <input type="number" id="calc_think" value="5" step="0.5" min="0.5" onchange="updateCalculator()">
+                            <small>Time between user requests</small>
+                        </div>
+                    </div>
+
+                    <div class="calc-input-panel">
+                        <h3>📐 Capacity Planning Calculator</h3>
+                        <p style="font-size: 13px; color: #64748b; margin-bottom: 15px;">Calculate required hardware infrastructure for your workload requirements</p>
+                        
+                        <div class="input-group">
+                            <label for="reverse_model">Model</label>
+                            <select id="reverse_model" onchange="updateReverseCalculator()">
+                                <option value="3.8,3.8B">Phi-3 Mini (3.8B)</option>
+                                <option value="7,7B">Mistral 7B</option>
+                                <option value="8,8B">Llama 3.1 8B</option>
+                                <option value="7,7B">Qwen 2.5 7B</option>
+                                <option value="9,9B">Gemma 2 9B</option>
+                                <option value="13,13B">Jais 13B (Arabic)</option>
+                                <option value="13,13B">Llama 2 13B</option>
+                                <option value="13,13B">Llama 3.1 13B</option>
+                                <option value="14,14B">DeepSeek 14B</option>
+                                <option value="27,27B">Gemma 2 27B</option>
+                                <option value="32,32B">Qwen 2.5 32B</option>
+                                <option value="34,34B">CodeLlama 34B</option>
+                                <option value="46.7,46.7B">Mixtral 8x7B (46.7B)</option>
+                                <option value="70,70B" selected>Llama 3.1 70B</option>
+                                <option value="72,72B">Qwen 2.5 72B</option>
+                                <option value="405,405B">Llama 3.1 405B</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reverse_users">Required Concurrent Users</label>
+                            <input type="number" id="reverse_users" value="100" step="10" min="1" onchange="updateReverseCalculator()">
+                            <small>Number of simultaneous users you want to support</small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reverse_input">Avg Input Length (tokens)</label>
+                            <input type="number" id="reverse_input" value="50" step="10" min="1" onchange="updateReverseCalculator()">
+                            <small>Typical prompts: 50-200, Long context: 1000+</small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reverse_tokens">Output Tokens/sec per User</label>
+                            <input type="number" id="reverse_tokens" value="10" step="1" min="0.1" onchange="updateReverseCalculator()">
+                            <small>Output generation rate (typically 5-20)</small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reverse_hardware">Target Hardware</label>
+                            <select id="reverse_hardware" onchange="updateReverseCalculator()">
+                                <optgroup label="NVIDIA H100">
+                                    <option value="989,fp16">H100 FP16 (989 TFLOPS)</option>
+                                    <option value="1979,int8" selected>H100 INT8 (1979 TOPS)</option>
+                                    <option value="3958,int4">H100 INT4 (3958 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA H200">
+                                    <option value="1248,fp16">H200 FP16 (1248 TFLOPS)</option>
+                                    <option value="2496,int8">H200 INT8 (2496 TOPS)</option>
+                                    <option value="4992,int4">H200 INT4 (4992 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A100 80GB">
+                                    <option value="312,fp16">A100 80GB FP16 (312 TFLOPS)</option>
+                                    <option value="624,int8">A100 80GB INT8 (624 TOPS)</option>
+                                    <option value="1248,int4">A100 80GB INT4 (1248 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A100 40GB">
+                                    <option value="156,fp16">A100 40GB FP16 (156 TFLOPS)</option>
+                                    <option value="312,int8">A100 40GB INT8 (312 TOPS)</option>
+                                    <option value="624,int4">A100 40GB INT4 (624 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A6000">
+                                    <option value="77.4,fp16">A6000 FP16 (77.4 TFLOPS)</option>
+                                    <option value="154.8,int8">A6000 INT8 (154.8 TOPS)</option>
+                                    <option value="309.6,int4">A6000 INT4 (309.6 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="NVIDIA A5000">
+                                    <option value="65,fp16">A5000 FP16 (65 TFLOPS)</option>
+                                    <option value="130,int8">A5000 INT8 (130 TOPS)</option>
+                                    <option value="260,int4">A5000 INT4 (260 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="AMD MI300X">
+                                    <option value="326.5,fp16">MI300X FP16 (326.5 TFLOPS)</option>
+                                    <option value="653,int8">MI300X INT8 (653 TOPS)</option>
+                                    <option value="1306,int4">MI300X INT4 (1306 TOPS)</option>
+                                </optgroup>
+                                <optgroup label="Intel Gaudi 3">
+                                    <option value="918,fp16">Gaudi 3 BF16 (918 TFLOPS)</option>
+                                    <option value="1835,int8">Gaudi 3 INT8 (1835 TOPS)</option>
+                                    <option value="3670,int4">Gaudi 3 INT4 (3670 TOPS)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reverse_util">Utilization Factor</label>
+                            <input type="number" id="reverse_util" value="0.35" step="0.05" min="0.1" max="0.9" onchange="updateReverseCalculator()">
+                            <small>Typical: 0.25-0.40</small>
+                        </div>
+                    </div>
+
+                    <div class="calc-results-panel">
+                        <h3>⚡ Performance Analysis</h3>
+                        
+                        <div class="result-card">
+                            <div class="result-icon">🎯</div>
+                            <div class="result-content">
+                                <div class="result-label">Theoretical Tokens/sec</div>
+                                <div class="result-value" id="calc_theoretical">-</div>
+                                <div class="result-equation" id="eq_theoretical"></div>
+                            </div>
+                        </div>
+
+                        <div class="result-card">
+                            <div class="result-icon">⚡</div>
+                            <div class="result-content">
+                                <div class="result-label">Realistic Tokens/sec</div>
+                                <div class="result-value" id="calc_realistic">-</div>
+                                <div class="result-sublabel" id="calc_words"></div>
+                                <div class="result-equation" id="eq_realistic"></div>
+                            </div>
+                        </div>
+
+                        <div class="result-card">
+                            <div class="result-icon">👥</div>
+                            <div class="result-content">
+                                <div class="result-label">Concurrent Users</div>
+                                <div class="result-value" id="calc_users">-</div>
+                                <div class="result-sublabel" id="calc_rate"></div>
+                                <div class="result-equation" id="eq_users"></div>
+                            </div>
+                        </div>
+
+                        <div class="calc-info">
+                            <strong>📊 Performance Calculation Model:</strong><br><br>
+                            <strong>1. Theoretical Peak Throughput:</strong><br>
+                            • Compute Limit: FLOPS ÷ (6 × Parameters × 10⁹)<br>
+                            • Memory Limit: Bandwidth ÷ (Model_Size + KV_Cache)<br>
+                            • Actual Bottleneck = min(compute, memory)<br><br>
+                            <strong>2. Production Throughput:</strong><br>
+                            • Base = Theoretical × Utilization × Quantization<br>
+                            • Prefill Overhead: -15% per 1000 input tokens<br>
+                            • Attention Overhead: -20% per 10K sequence length<br><br>
+                            <strong>3. Concurrent User Capacity:</strong><br>
+                            • Users = Throughput ÷ (Output ÷ Think_Time)<br>
+                            • Per-user token generation rate considered<br><br>
+                            <strong>Key Parameters:</strong><br>
+                            • U = 0.25-0.40 (system utilization factor)<br>
+                            • Q = 0.80-0.95 (quantization efficiency)<br>
+                            • 6N = FLOPs per output token (transformer operations)
+                        </div>
+                    </div>
+
+                    <div class="calc-results-panel">
+                        <h3>📐 Infrastructure Requirements</h3>
+                        
+                        <div class="result-card">
+                            <div class="result-icon">🖥️</div>
+                            <div class="result-content">
+                                <div class="result-label">Hardware Units Needed</div>
+                                <div class="result-value" id="reverse_units">-</div>
+                                <div class="result-sublabel" id="reverse_total_ops"></div>
+                                <div class="result-equation" id="reverse_equation"></div>
+                            </div>
+                        </div>
+
+                        <div class="result-card">
+                            <div class="result-icon">⚡</div>
+                            <div class="result-content">
+                                <div class="result-label">Total Throughput</div>
+                                <div class="result-value" id="reverse_throughput">-</div>
+                                <div class="result-sublabel" id="reverse_per_unit"></div>
+                                <div class="result-equation" id="reverse_breakdown"></div>
+                            </div>
+                        </div>
+
+                        <div class="calc-info">
+                            <strong>💡 Production Planning Guide:</strong><br><br>
+                            <strong>Overhead Factors Applied:</strong><br>
+                            • Prefill: +15% per 1000 input tokens (batch processing)<br>
+                            • Attention: +20% per 10K sequence (O(n²) complexity)<br>
+                            • Redundancy: +15% (N+1 failover, peak handling)<br><br>
+                            <strong>Capacity Planning:</strong><br>
+                            • Always round UP to whole units<br>
+                            • Target 10-20% headroom for bursts<br>
+                            • Plan for 1-2 units offline (maintenance)<br>
+                            • Monitor: aim for 60-80% average utilization<br><br>
+                            <strong>Cost Optimization:</strong><br>
+                            • Batch users during low traffic<br>
+                            • Use smaller models for simple queries<br>
+                            • INT8/INT4 quantization: 40-60% cost savings
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-sections">
+            <div class="footer-box">
+                <h3>Performance Metric Definitions</h3>
+                <ul>
+                    <li><strong>Throughput:</strong> Number of output tokens generated per second - higher is better for batch processing</li>
+                    <li><strong>Total Latency:</strong> Complete request processing time from input to final output</li>
+                    <li><strong>TTFT:</strong> Time to First Token - critical for user-perceived responsiveness in interactive applications</li>
+                    <li><strong>Concurrent Users:</strong> Maximum number of simultaneous users the system can efficiently support</li>
+                    <li><strong>Batch Size:</strong> Optimal number of requests processed together for maximum efficiency</li>
+                    <li><strong>Context Window:</strong> Maximum number of tokens the model can process in a single request</li>
+                </ul>
+            </div>
+            <div class="footer-box">
+                <h3>Benchmark Test Configuration</h3>
+                <ul>
+                    <li><strong>Input Length:</strong> Average 250 tokens per request (typical user prompt)</li>
+                    <li><strong>Output Length:</strong> Average 200 tokens per response (comprehensive answer)</li>
+                    <li><strong>Context Window:</strong> Ranges from 4K to 32K tokens depending on model architecture</li>
+                    <li><strong>Inference Framework:</strong> vLLM with FlashAttention-2 optimization for maximum throughput</li>
+                    <li><strong>Batching Strategy:</strong> Continuous batching enabled for optimal resource utilization</li>
+                    <li><strong>Test Environment:</strong> Production-grade configuration with real-world load patterns</li>
+                </ul>
+            </div>
+            <div class="footer-box">
+                <h3>Recommended Use Cases by Model Size</h3>
+                <ul>
+                    <li><strong>Small Models (1B-7B):</strong> Ideal for chatbots, semantic search, text classification, embeddings generation, and AI agents with fast response requirements</li>
+                    <li><strong>Medium Models (13B-15B):</strong> Perfect for customer support automation, content generation, language translation, and summarization tasks</li>
+                    <li><strong>Large Models (30B-40B):</strong> Best suited for complex reasoning, advanced code generation, research assistance, and sophisticated dialogue systems</li>
+                    <li><strong>Very Large Models (65B-70B):</strong> Enterprise-grade expert systems, multi-domain AI assistants, and mission-critical applications requiring highest accuracy</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="warning-box">
+            <div>
+                <strong>Important Considerations:</strong> Actual performance varies based on model architecture specifics, prompt complexity, 
+                request patterns, hardware capabilities, and concurrent load. These benchmarks represent typical scenarios under controlled 
+                conditions. Always conduct your own testing with representative workloads before production deployment.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>
