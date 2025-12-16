@@ -4,8 +4,10 @@ import { getHardwareFamily, HARDWARE_FAMILIES } from '@/lib/config';
 
 export function useHardwareFilter(quantization: string) {
   return useMemo(() => {
-    // Show ALL hardware regardless of quantization - let users choose
-    const available = hardwareDatabase;
+    // Filter hardware to match selected quantization
+    const available = hardwareDatabase.filter(hw => 
+      hw.quantTypes.includes(quantization as any)
+    );
     
     // Group by hardware family
     const groups: { [key: string]: HardwareOption[] } = {};
@@ -20,11 +22,15 @@ export function useHardwareFilter(quantization: string) {
 }
 
 export function useHardwareGroups(quantization: string) {
-  // ALWAYS return all hardware - ignore quantization filtering completely
   return useMemo(() => {
+    // Filter hardware to match selected quantization
+    const filteredHardware = hardwareDatabase.filter(hw => 
+      hw.quantTypes.includes(quantization as any)
+    );
+    
     // Group by hardware family
     const groups: { [key: string]: HardwareOption[] } = {};
-    hardwareDatabase.forEach(hw => {
+    filteredHardware.forEach(hw => {
       const family = getHardwareFamily(hw.name);
       if (!groups[family]) groups[family] = [];
       groups[family].push(hw);
@@ -38,7 +44,7 @@ export function useHardwareGroups(quantization: string) {
       return null;
     }).filter((item): item is { family: string; options: HardwareOption[] } => item !== null);
     
-    // ALWAYS return at least something - this ensures hardware is never empty
+    // Fallback to all hardware if no match (shouldn't happen)
     return result.length > 0 ? result : [{ family: 'All Hardware', options: hardwareDatabase }];
-  }, []); // No dependencies - always returns the same result
+  }, [quantization]);
 }

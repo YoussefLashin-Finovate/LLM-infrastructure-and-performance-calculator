@@ -15,14 +15,15 @@ export interface ModelOption {
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
+  { value: 'custom', name: '🎨 Custom Model Configuration', params: 0 },
   { value: '3.8', name: 'Phi-3 Mini (3.8B)', params: 3.8 },
   { value: '7', name: 'Mistral 7B', params: 7 },
   { value: '8', name: 'Llama 3.1 8B', params: 8 },
-  { value: '7', name: 'Qwen 2.5 7B', params: 7 },
+  { value: '7.1', name: 'Qwen 2.5 7B', params: 7 },
   { value: '9', name: 'Gemma 2 9B', params: 9 },
   { value: '13', name: 'Jais 13B (Arabic)', params: 13 },
-  { value: '13', name: 'Llama 2 13B', params: 13 },
-  { value: '13', name: 'Llama 3.1 13B', params: 13 },
+  { value: '13.1', name: 'Llama 2 13B', params: 13 },
+  { value: '13.2', name: 'Llama 3.1 13B', params: 13 },
   { value: '14', name: 'DeepSeek 14B', params: 14 },
   { value: '27', name: 'Gemma 2 27B', params: 27 },
   { value: '32', name: 'Qwen 2.5 32B', params: 32 },
@@ -30,7 +31,26 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { value: '46.7', name: 'Mixtral 8x7B (46.7B)', params: 46.7 },
   { value: '70', name: 'Llama 3.1 70B', params: 70 },
   { value: '72', name: 'Qwen 2.5 72B', params: 72 },
+  { value: '120', name: 'GPT OSS 120B (MoE)', params: 120 },
   { value: '405', name: 'Llama 3.1 405B', params: 405 },
+];
+
+// ============================================================================
+// MoE MODEL ARCHITECTURE OPTIONS
+// ============================================================================
+
+export interface MoeModelOption {
+  value: string;
+  name: string;
+  description: string;
+}
+
+export const MOE_MODEL_OPTIONS: MoeModelOption[] = [
+  { value: '', name: 'Dense Model (Default)', description: 'Standard transformer architecture' },
+  { value: 'mixtral-8x7b', name: 'Mixtral 8x7B', description: '8 experts, 2 active per token' },
+  { value: 'mixtral-8x22b', name: 'Mixtral 8x22B', description: '8 experts, 2 active per token' },
+  { value: 'deepseek-v2', name: 'DeepSeek V2', description: '160 experts, 6 active per token' },
+  { value: 'gpt-oss-120b', name: 'GPT OSS 120B', description: '16 experts, 2 active per token' },
 ];
 
 // ============================================================================

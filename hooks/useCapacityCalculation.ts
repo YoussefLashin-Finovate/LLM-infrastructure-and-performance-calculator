@@ -11,6 +11,18 @@ interface UseCapacityCalculationProps {
   inputLength: number;
   tokensPerSec: number;
   utilization: number;
+  useKVCache?: boolean;
+  systemPromptTokens?: number;
+  sessionHistoryTokens?: number;
+  newInputTokens?: number;
+  kvOffloading?: boolean;
+  kvOffloadingPercentage?: number;
+  useMoeArchitecture?: boolean;
+  useCustomModel?: boolean;
+  customTotalParams?: number;
+  customActiveParams?: number;
+  customTotalExperts?: number;
+  customActiveExperts?: number;
 }
 
 export function useCapacityCalculation({
@@ -21,6 +33,18 @@ export function useCapacityCalculation({
   inputLength,
   tokensPerSec,
   utilization,
+  useKVCache = false,
+  systemPromptTokens = 0,
+  sessionHistoryTokens = 0,
+  newInputTokens = 0,
+  kvOffloading = false,
+  kvOffloadingPercentage = 100,
+  useMoeArchitecture = false,
+  useCustomModel = false,
+  customTotalParams = 1,
+  customActiveParams = 1,
+  customTotalExperts = 8,
+  customActiveExperts = 2,
 }: UseCapacityCalculationProps) {
   return useMemo(() => {
     // Parse hardware ops (TFLOPS/POPS) - extract the numeric value correctly
@@ -35,7 +59,21 @@ export function useCapacityCalculation({
       hardwareOpsPerUnit = hardwareOpsPerUnit * 1e12; // TFLOPS to FLOPS
     }
     
-    const modelParams = parseFloat(model);
+    // Use custom model params if custom model is enabled or if model='custom'
+    const effectiveUseCustomModel = useCustomModel || model === 'custom';
+    const modelParams = effectiveUseCustomModel ? customTotalParams : parseFloat(model);
+    
+    // Build token breakdown if KV cache is enabled
+    const tokenBreakdown = useKVCache ? {
+      systemPromptTokens,
+      sessionHistoryTokens,
+      newInputTokens,
+      outputTokens: tokensPerSec
+    } : undefined;
+    
+    // Get GPU memory from hardware database
+    const selectedHardware = hardwareDatabase.find(hw => hw.value === hardware);
+    const vramPerUnit = selectedHardware?.memory || 0;
     
     const results = calculateReverseInfrastructure({
       modelParams,
@@ -45,11 +83,19 @@ export function useCapacityCalculation({
       hardwareOpsPerUnit,
       utilization,
       quantType,
+      tokenBreakdown,
+      gpuMemoryGB: vramPerUnit,
+      kvOffloading,
+      kvOffloadingPercentage,
+      useMoeArchitecture,
+      useCustomModel: effectiveUseCustomModel,
+      customTotalParams,
+      customActiveParams,
+      customTotalExperts,
+      customActiveExperts,
     });
     
     // Calculate accumulated VRAM and FLOPS
-    const selectedHardware = hardwareDatabase.find(hw => hw.value === hardware);
-    const vramPerUnit = selectedHardware?.memory || 0;
     const totalVRAM = vramPerUnit * results.unitsNeeded;
     const totalFLOPS = hardwareOpsPerUnit * results.unitsNeeded;
     const modelSize = calculateModelSize(modelParams, quantType);
@@ -61,5 +107,5 @@ export function useCapacityCalculation({
       modelSize,
       vramPerUnit,
     };
-  }, [model, hardware, users, inputLength, tokensPerSec, utilization]);
+  }, [model, hardware, users, inputLength, tokensPerSec, utilization, quantization, useKVCache, systemPromptTokens, sessionHistoryTokens, newInputTokens, kvOffloading, kvOffloadingPercentage, useMoeArchitecture, useCustomModel, customTotalParams, customActiveParams, customTotalExperts, customActiveExperts]);
 }

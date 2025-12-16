@@ -17,6 +17,23 @@ export default function AdvancedCalculator() {
   const [inputLength, setInputLength] = useState(DEFAULT_VALUES.performance.inputLength);
   const [responseLength, setResponseLength] = useState(DEFAULT_VALUES.performance.responseLength);
   const [thinkTime, setThinkTime] = useState(DEFAULT_VALUES.performance.thinkTime);
+  
+  // KV Cache toggle and token breakdown
+  const [useKVCache, setUseKVCache] = useState(false);
+  const [kvOffloading, setKvOffloading] = useState(false);
+  const [systemPromptTokens, setSystemPromptTokens] = useState(500);
+  const [sessionHistoryTokens, setSessionHistoryTokens] = useState(2000);
+  const [newInputTokens, setNewInputTokens] = useState(512);
+  
+  // MoE Architecture Toggle
+  const [useMoeArchitecture, setUseMoeArchitecture] = useState(false);
+  
+  // Custom Model Configuration
+  const [useCustomModel, setUseCustomModel] = useState(false);
+  const [customTotalParams, setCustomTotalParams] = useState(70);
+  const [customActiveParams, setCustomActiveParams] = useState(70);
+  const [customTotalExperts, setCustomTotalExperts] = useState(8);
+  const [customActiveExperts, setCustomActiveExperts] = useState(2);
 
   // Capacity Planner State
   const [reverseModel, setReverseModel] = useState(DEFAULT_VALUES.capacity.model);
@@ -26,6 +43,24 @@ export default function AdvancedCalculator() {
   const [reverseTokens, setReverseTokens] = useState(DEFAULT_VALUES.capacity.tokensPerSec);
   const [reverseHardware, setReverseHardware] = useState(DEFAULT_VALUES.capacity.hardware);
   const [reverseUtil, setReverseUtil] = useState(DEFAULT_VALUES.capacity.utilization);
+  
+  // KV Cache toggle and token breakdown for reverse
+  const [reverseUseKVCache, setReverseUseKVCache] = useState(false);
+  const [reverseKvOffloading, setReverseKvOffloading] = useState(false);
+  const [reverseKvOffloadingPercentage, setReverseKvOffloadingPercentage] = useState(100);
+  const [reverseSystemPromptTokens, setReverseSystemPromptTokens] = useState(500);
+  const [reverseSessionHistoryTokens, setReverseSessionHistoryTokens] = useState(2000);
+  const [reverseNewInputTokens, setReverseNewInputTokens] = useState(512);
+  
+  // MoE Architecture Toggle for reverse
+  const [reverseUseMoeArchitecture, setReverseUseMoeArchitecture] = useState(false);
+  
+  // Custom Model Configuration for reverse
+  const [reverseUseCustomModel, setReverseUseCustomModel] = useState(false);
+  const [reverseCustomTotalParams, setReverseCustomTotalParams] = useState(70);
+  const [reverseCustomActiveParams, setReverseCustomActiveParams] = useState(70);
+  const [reverseCustomTotalExperts, setReverseCustomTotalExperts] = useState(8);
+  const [reverseCustomActiveExperts, setReverseCustomActiveExperts] = useState(2);
 
   // UI State
   const [activeTab, setActiveTab] = useState<'performance' | 'capacity'>('performance');
@@ -38,6 +73,17 @@ export default function AdvancedCalculator() {
     inputLength,
     responseLength,
     thinkTime,
+    useKVCache,
+    kvOffloading,
+    systemPromptTokens,
+    sessionHistoryTokens,
+    newInputTokens,
+    useMoeArchitecture,
+    useCustomModel,
+    customTotalParams,
+    customActiveParams,
+    customTotalExperts,
+    customActiveExperts,
   });
 
   const capacityResults = useCapacityCalculation({
@@ -48,6 +94,18 @@ export default function AdvancedCalculator() {
     inputLength: reverseInput,
     tokensPerSec: reverseTokens,
     utilization: reverseUtil,
+    useKVCache: reverseUseKVCache,
+    kvOffloading: reverseKvOffloading,
+    kvOffloadingPercentage: reverseKvOffloadingPercentage,
+    systemPromptTokens: reverseSystemPromptTokens,
+    sessionHistoryTokens: reverseSessionHistoryTokens,
+    newInputTokens: reverseNewInputTokens,
+    useMoeArchitecture: reverseUseMoeArchitecture,
+    useCustomModel: reverseUseCustomModel,
+    customTotalParams: reverseCustomTotalParams,
+    customActiveParams: reverseCustomActiveParams,
+    customTotalExperts: reverseCustomTotalExperts,
+    customActiveExperts: reverseCustomActiveExperts,
   });
 
   // Hardware filtering hooks
@@ -159,6 +217,28 @@ export default function AdvancedCalculator() {
           setResponseLength={setResponseLength}
           thinkTime={thinkTime}
           setThinkTime={setThinkTime}
+          useKVCache={useKVCache}
+          setUseKVCache={setUseKVCache}
+          kvOffloading={kvOffloading}
+          setKvOffloading={setKvOffloading}
+          systemPromptTokens={systemPromptTokens}
+          setSystemPromptTokens={setSystemPromptTokens}
+          sessionHistoryTokens={sessionHistoryTokens}
+          setSessionHistoryTokens={setSessionHistoryTokens}
+          newInputTokens={newInputTokens}
+          setNewInputTokens={setNewInputTokens}
+          useMoeArchitecture={useMoeArchitecture}
+          setUseMoeArchitecture={setUseMoeArchitecture}
+          useCustomModel={useCustomModel}
+          setUseCustomModel={setUseCustomModel}
+          customTotalParams={customTotalParams}
+          setCustomTotalParams={setCustomTotalParams}
+          customActiveParams={customActiveParams}
+          setCustomActiveParams={setCustomActiveParams}
+          customTotalExperts={customTotalExperts}
+          setCustomTotalExperts={setCustomTotalExperts}
+          customActiveExperts={customActiveExperts}
+          setCustomActiveExperts={setCustomActiveExperts}
           results={performanceResults}
         />
       )}
@@ -180,6 +260,30 @@ export default function AdvancedCalculator() {
           setTokensPerSec={setReverseTokens}
           utilization={reverseUtil}
           setUtilization={setReverseUtil}
+          useKVCache={reverseUseKVCache}
+          setUseKVCache={setReverseUseKVCache}
+          kvOffloading={reverseKvOffloading}
+          setKvOffloading={setReverseKvOffloading}
+          kvOffloadingPercentage={reverseKvOffloadingPercentage}
+          setKvOffloadingPercentage={setReverseKvOffloadingPercentage}
+          systemPromptTokens={reverseSystemPromptTokens}
+          setSystemPromptTokens={setReverseSystemPromptTokens}
+          sessionHistoryTokens={reverseSessionHistoryTokens}
+          setSessionHistoryTokens={setReverseSessionHistoryTokens}
+          newInputTokens={reverseNewInputTokens}
+          setNewInputTokens={setReverseNewInputTokens}
+          useMoeArchitecture={reverseUseMoeArchitecture}
+          setUseMoeArchitecture={setReverseUseMoeArchitecture}
+          useCustomModelReverse={reverseUseCustomModel}
+          setUseCustomModelReverse={setReverseUseCustomModel}
+          customTotalParamsReverse={reverseCustomTotalParams}
+          setCustomTotalParamsReverse={setReverseCustomTotalParams}
+          customActiveParamsReverse={reverseCustomActiveParams}
+          setCustomActiveParamsReverse={setReverseCustomActiveParams}
+          customTotalExpertsReverse={reverseCustomTotalExperts}
+          setCustomTotalExpertsReverse={setReverseCustomTotalExperts}
+          customActiveExpertsReverse={reverseCustomActiveExperts}
+          setCustomActiveExpertsReverse={setReverseCustomActiveExperts}
           results={capacityResults}
         />
       )}

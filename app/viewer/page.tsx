@@ -163,6 +163,7 @@ export default function CombinedViewerPage() {
 
         <FooterSections />
 
+
         <InfoBox type="warning">
           <div>
             <strong>Important Considerations:</strong> Actual performance varies based on model architecture specifics, prompt complexity, 
@@ -170,6 +171,17 @@ export default function CombinedViewerPage() {
             conditions. Always conduct your own testing with representative workloads before production deployment.
           </div>
         </InfoBox>
+        <div className="copyright-notice" style={{
+          textAlign: 'center',
+          padding: '20px',
+          marginTop: '20px',
+          borderTop: '1px solid #e5e7eb',
+          color: '#6b7280',
+          fontSize: '14px',
+          fontWeight: '500'
+        }}>
+          © 2025 Finovate Team. All rights reserved.
+        </div>
       </div>
     </>
   );
