@@ -15,7 +15,7 @@ export default function ChartViewerPage() {
   return (
     <>
       <Header 
-        title="LLM Inference Performance Reference"
+        title="LLM Infrastructure & Performance Calculator"
         subtitle="Performance metrics for Arabic-capable and general-purpose language models<br>Comprehensive benchmarks for models under 70B parameters"
       />
       

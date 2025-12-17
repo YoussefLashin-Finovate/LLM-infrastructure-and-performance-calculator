@@ -21,8 +21,8 @@ export default function CombinedViewerPage() {
   return (
     <>
       <Header 
-        title="LLM Inference Performance Reference"
-        subtitle="Enterprise-grade performance metrics for Arabic-capable and general-purpose language models<br>Comprehensive benchmarks for models under 70B parameters with real-world deployment insights"
+        title="LLM Infrastructure & Performance Calculator"
+        subtitle="A production-grade web application for modeling and visualizing Large Language Model (LLM) inference performance across GPUs, quantization levels, and deployment scenarios."
       />
       
       <div className="py-10 px-12">

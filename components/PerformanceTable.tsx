@@ -1,6 +1,7 @@
 'use client';
 
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 interface PerformanceTableProps {
   quantization: QuantizationType;
@@ -90,85 +91,97 @@ export default function PerformanceTable({ quantization, hardware, metric }: Per
   ];
 
   return (
-    <div className="overflow-x-auto rounded-xl shadow-md mb-8">
-      <table className="w-full border-collapse text-[13px] bg-white">
-        <thead className="sticky top-0 z-10">
-          <tr>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-left font-semibold border-none text-[13px] uppercase tracking-wide first:rounded-tl-xl">
-              Models<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Available Options</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-left font-semibold border-none text-[13px] uppercase tracking-wide">
-              Parameters<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Size Range</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              TTFT<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(ms)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Latency<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(ms)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Users<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Concurrent</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Batch<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Size</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              VRAM<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(GB)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide last:rounded-tr-xl">
-              Context<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Window</small>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {modelCategories.map((cat, idx) => {
-            const modelList = cat.models.map(model => {
-              if (cat.arabicModels.includes(model)) {
-                return `<span class="bg-gradient-to-r from-orange-200 to-orange-400 text-white px-2 py-0.5 rounded-md font-bold shadow-sm">${model}</span>`;
-              }
-              return model;
-            }).join(' • ');
-
-            return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm mb-8">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+            <tr>
+              <th className="p-4 w-1/3 min-w-[300px]">
+                Models
+                <div className="font-normal text-xs text-slate-500 mt-1">Available Options</div>
+              </th>
+              <th className="p-4 text-center">
+                Parameters
+                <div className="font-normal text-xs text-slate-500 mt-1">Size Range</div>
+              </th>
+              <th className="p-4 text-center">
+                TTFT
+                <div className="font-normal text-xs text-slate-500 mt-1">(ms)</div>
+              </th>
+              <th className="p-4 text-center">
+                Latency
+                <div className="font-normal text-xs text-slate-500 mt-1">(ms)</div>
+              </th>
+              <th className="p-4 text-center">
+                Users
+                <div className="font-normal text-xs text-slate-500 mt-1">Concurrent</div>
+              </th>
+              <th className="p-4 text-center">
+                Batch
+                <div className="font-normal text-xs text-slate-500 mt-1">Size</div>
+              </th>
+              <th className="p-4 text-center">
+                VRAM
+                <div className="font-normal text-xs text-slate-500 mt-1">(GB)</div>
+              </th>
+              <th className="p-4 text-center">
+                Context
+                <div className="font-normal text-xs text-slate-500 mt-1">Window</div>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {modelCategories.map((cat, idx) => (
               <tr
                 key={idx}
-                className={`transition-all duration-200 ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50 hover:scale-[1.01] hover:shadow-md`}
+                className={cn(
+                  "hover:bg-slate-50/80 transition-colors",
+                  idx % 2 === 1 ? "bg-slate-50/30" : ""
+                )}
               >
-                <td className="p-3.5 border border-gray-200 leading-[1.8]" dangerouslySetInnerHTML={{ __html: modelList }} />
-                <td className="p-3.5 border border-gray-200">
-                  <strong>{cat.params}</strong>
+                <td className="p-4 align-top">
+                  <div className="flex flex-wrap gap-2">
+                    {cat.models.map(model => (
+                      <span
+                        key={model}
+                        className={cn(
+                          "inline-flex items-center px-2 py-1 rounded text-xs font-medium border",
+                          cat.arabicModels.includes(model)
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : "bg-slate-100/50 text-slate-600 border-slate-200"
+                        )}
+                      >
+                        {model}
+                      </span>
+                    ))}
+                  </div>
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
+                <td className="p-4 text-center font-medium text-slate-700 align-middle">
+                  {cat.params}
+                </td>
+                <td className="p-4 text-center text-slate-600 align-middle">
                   {cat.ttft}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
+                <td className="p-4 text-center text-slate-600 align-middle">
                   {cat.latency}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
+                <td className="p-4 text-center text-slate-600 align-middle">
                   {cat.users}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center font-bold">
+                <td className="p-4 text-center font-semibold text-slate-900 align-middle">
                   {cat.batchSize}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
+                <td className="p-4 text-center text-slate-600 align-middle">
                   {cat.vram}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
+                <td className="p-4 text-center text-slate-600 align-middle">
                   {cat.context.toLocaleString()}
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

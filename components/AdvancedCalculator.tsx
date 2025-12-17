@@ -7,6 +7,7 @@ import { usePerformanceCalculation } from '@/hooks/usePerformanceCalculation';
 import { useCapacityCalculation } from '@/hooks/useCapacityCalculation';
 import { useHardwareFilter } from '@/hooks/useHardwareFilter';
 import { DEFAULT_VALUES, UI_CONFIG } from '@/lib/config';
+import { cn } from '@/lib/utils';
 
 export default function AdvancedCalculator() {
   // Performance Calculator State
@@ -17,17 +18,17 @@ export default function AdvancedCalculator() {
   const [inputLength, setInputLength] = useState(DEFAULT_VALUES.performance.inputLength);
   const [responseLength, setResponseLength] = useState(DEFAULT_VALUES.performance.responseLength);
   const [thinkTime, setThinkTime] = useState(DEFAULT_VALUES.performance.thinkTime);
-  
+
   // KV Cache toggle and token breakdown
   const [useKVCache, setUseKVCache] = useState(false);
   const [kvOffloading, setKvOffloading] = useState(false);
   const [systemPromptTokens, setSystemPromptTokens] = useState(500);
   const [sessionHistoryTokens, setSessionHistoryTokens] = useState(2000);
   const [newInputTokens, setNewInputTokens] = useState(512);
-  
+
   // MoE Architecture Toggle
   const [useMoeArchitecture, setUseMoeArchitecture] = useState(false);
-  
+
   // Custom Model Configuration
   const [useCustomModel, setUseCustomModel] = useState(false);
   const [customTotalParams, setCustomTotalParams] = useState(70);
@@ -43,7 +44,7 @@ export default function AdvancedCalculator() {
   const [reverseTokens, setReverseTokens] = useState(DEFAULT_VALUES.capacity.tokensPerSec);
   const [reverseHardware, setReverseHardware] = useState(DEFAULT_VALUES.capacity.hardware);
   const [reverseUtil, setReverseUtil] = useState(DEFAULT_VALUES.capacity.utilization);
-  
+
   // KV Cache toggle and token breakdown for reverse
   const [reverseUseKVCache, setReverseUseKVCache] = useState(false);
   const [reverseKvOffloading, setReverseKvOffloading] = useState(false);
@@ -51,10 +52,10 @@ export default function AdvancedCalculator() {
   const [reverseSystemPromptTokens, setReverseSystemPromptTokens] = useState(500);
   const [reverseSessionHistoryTokens, setReverseSessionHistoryTokens] = useState(2000);
   const [reverseNewInputTokens, setReverseNewInputTokens] = useState(512);
-  
+
   // MoE Architecture Toggle for reverse
   const [reverseUseMoeArchitecture, setReverseUseMoeArchitecture] = useState(false);
-  
+
   // Custom Model Configuration for reverse
   const [reverseUseCustomModel, setReverseUseCustomModel] = useState(false);
   const [reverseCustomTotalParams, setReverseCustomTotalParams] = useState(70);
@@ -87,7 +88,7 @@ export default function AdvancedCalculator() {
   });
 
   // Calculation mode (auto / cpu / gpu)
-  const [calcMode, setCalcMode] = useState<'auto'|'cpu'|'gpu'>('auto');
+  const [calcMode, setCalcMode] = useState<'auto' | 'cpu' | 'gpu'>('auto');
   const [cpuTps, setCpuTps] = useState<number>(8);
   const [cpuPrefillMultiplier, setCpuPrefillMultiplier] = useState<number>(2.5);
   const [cpuUtilizationTarget, setCpuUtilizationTarget] = useState<number>(0.65);
@@ -157,78 +158,44 @@ export default function AdvancedCalculator() {
   }, [reverseQuantization, availableReverseHardware, reverseHardware]);
 
   return (
-    <div className="calculator-panel">
-      <div style={{ textAlign: 'center', marginBottom: UI_CONFIG.spacing.sectionGap }}>
-        <h2 style={{ 
-          color: UI_CONFIG.colors.primary,
-          marginBottom: '16px', 
-          fontSize: UI_CONFIG.typography.headingSize,
-          fontWeight: '800',
-          letterSpacing: '-0.5px',
-          lineHeight: '1.2'
-        }}>
-          {UI_CONFIG.icons.performance} LLM Performance & Capacity Planning
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 md:p-8">
+      <div className="text-center mb-10">
+        <h2 className="text-3xl font-bold text-slate-900 mb-4 tracking-tight">
+          LLM Performance & Capacity Planning
         </h2>
-        <p style={{ 
-          color: UI_CONFIG.colors.secondary,
-          fontSize: UI_CONFIG.typography.bodySize,
-          maxWidth: '900px', 
-          margin: '0 auto',
-          lineHeight: '1.6'
-        }}>
+        <p className="text-lg text-slate-600 max-w-3xl mx-auto leading-relaxed">
           Calculate theoretical and realistic throughput, concurrent user capacity, and infrastructure requirements for Large Language Model deployments
         </p>
       </div>
 
       {/* Tabs */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '8px', 
-        marginBottom: '36px', 
-        borderBottom: `3px solid ${UI_CONFIG.colors.border}`,
-        paddingBottom: '0',
-        justifyContent: 'center'
-      }}>
-        <button
-          onClick={() => setActiveTab('performance')}
-          style={{
-            padding: '14px 32px',
-            border: 'none',
-            borderBottom: activeTab === 'performance' ? `4px solid ${UI_CONFIG.colors.primaryLight}` : '4px solid transparent',
-            background: activeTab === 'performance' ? UI_CONFIG.colors.primaryBgGradient : 'transparent',
-            color: activeTab === 'performance' ? UI_CONFIG.colors.primary : UI_CONFIG.colors.secondary,
-            fontWeight: '700',
-            fontSize: '16px',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            marginBottom: '-3px',
-            borderRadius: '8px 8px 0 0',
-            boxShadow: activeTab === 'performance' ? `0 -2px 8px rgba(16, 185, 129, 0.1)` : 'none'
-          }}
-        >
-          {UI_CONFIG.icons.chart} Performance Calculator
-        </button>
-        <button
-          onClick={() => setActiveTab('capacity')}
-          style={{
-            padding: '14px 32px',
-            border: 'none',
-            borderBottom: activeTab === 'capacity' ? `4px solid ${UI_CONFIG.colors.primaryLight}` : '4px solid transparent',
-            background: activeTab === 'capacity' ? UI_CONFIG.colors.primaryBgGradient : 'transparent',
-            color: activeTab === 'capacity' ? UI_CONFIG.colors.primary : UI_CONFIG.colors.secondary,
-            fontWeight: '700',
-            fontSize: '16px',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            marginBottom: '-3px',
-            borderRadius: '8px 8px 0 0',
-            boxShadow: activeTab === 'capacity' ? `0 -2px 8px rgba(16, 185, 129, 0.1)` : 'none'
-          }}
-        >
-          {UI_CONFIG.icons.capacity} Capacity Planning
-        </button>
+      <div className="flex justify-center mb-8 border-b border-slate-200">
+        <div className="flex space-x-1">
+          <button
+            onClick={() => setActiveTab('performance')}
+            className={cn(
+              "px-6 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2",
+              activeTab === 'performance'
+                ? "border-blue-600 text-blue-600 bg-blue-50/50"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+            )}
+          >
+            Performance Calculator
+          </button>
+          <button
+            onClick={() => setActiveTab('capacity')}
+            className={cn(
+              "px-6 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2",
+              activeTab === 'capacity'
+                ? "border-blue-600 text-blue-600 bg-blue-50/50"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+            )}
+          >
+            Capacity Planning
+          </button>
+        </div>
       </div>
-      
+
       {/* Performance Calculator Tab */}
       {activeTab === 'performance' && (
         <PerformanceCalculator
