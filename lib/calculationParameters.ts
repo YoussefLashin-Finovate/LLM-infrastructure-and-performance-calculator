@@ -12,6 +12,11 @@ export const quantEfficiency: Record<string, number> = {
   int4: 0.80
 };
 
+// CPU vs GPU efficiency factors
+export const cpuUtilizationFactor = 0.25;  // Realistic CPU utilization (15-30%)
+export const cpuMemoryBandwidth = 307;     // DDR5-4800 bandwidth in GB/s
+export const gpuUtilizationFactor = 0.35;  // Conservative GPU utilization
+
 // Memory bandwidth considerations (GB/s)
 export const memoryBandwidth: Record<string, Record<string, number>> = {
   fp16: { h100: 3350, h200: 4800, a100: 2000, a6000: 768, default: 1000 },
@@ -156,4 +161,38 @@ export const calculateDecodeFlopsPerToken = (
 export const calculateVRAMSafetyBuffer = (gpuMemoryGB: number): number => {
   const percentBased = gpuMemoryGB * VRAM_SAFETY_BUFFER_PERCENT;
   return Math.max(percentBased, VRAM_MIN_SAFETY_BUFFER_GB);
+};
+
+/**
+ * Determine if hardware is CPU-based
+ * @param hardwareValue - Hardware value string from database
+ * @returns true if CPU, false if GPU
+ */
+export const isCPUHardware = (hardwareValue: string): boolean => {
+  // Check if it's a Xeon CPU (contains "int8" and low TOPS values 0.6-4.0)
+  const opsValue = parseFloat(hardwareValue.split(',')[0]);
+  return hardwareValue.includes('int8') && opsValue < 5.0;
+};
+
+/**
+ * Calculate realistic CPU throughput considering memory bandwidth bottleneck
+ * CPUs are heavily memory-bound for LLM inference
+ * @param peakTOPS - Peak AMX TOPS
+ * @param modelSizeGB - Model size in GB
+ * @param utilizationFactor - Realistic utilization (0.15-0.30)
+ * @returns Sustained TOPS accounting for memory bottleneck
+ */
+export const calculateCPUSustainedThroughput = (
+  peakTOPS: number,
+  modelSizeGB: number,
+  utilizationFactor: number = cpuUtilizationFactor
+): number => {
+  // Memory bandwidth limit (DDR5-4800: ~307 GB/s per CPU)
+  const memoryBoundLimit = cpuMemoryBandwidth / modelSizeGB;
+  
+  // Compute limit with realistic utilization
+  const computeLimit = peakTOPS * 1e12 * utilizationFactor;
+  
+  // Return the bottleneck (almost always memory-bound)
+  return Math.min(computeLimit, memoryBoundLimit * 1e12) / 1e12; // Convert back to TOPS
 };

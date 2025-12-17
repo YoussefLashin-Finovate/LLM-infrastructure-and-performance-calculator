@@ -446,6 +446,7 @@ export function calculateReverseInfrastructure(inputs: ReverseCalculatorInputs):
     tokenBreakdown,
     coldStartRate = 0,
     gpuMemoryGB,
+    cpuMemoryGB, // optional CPU memory hint (GB)
     kvOffloading = false,
     kvOffloadingPercentage = 100, // Default to 100% offloading when kvOffloading is true
     useMoeArchitecture = false,
@@ -454,8 +455,21 @@ export function calculateReverseInfrastructure(inputs: ReverseCalculatorInputs):
     customTotalParams = 1,
     customActiveParams = 1,
     customTotalExperts = 8,
-    customActiveExperts = 2
+    customActiveExperts = 2,
+    isCPU = false
   } = inputs;
+  
+  // CPU-specific warning and reality check
+  if (isCPU && typeof window !== 'undefined') {
+    console.warn('⚠️ CPU-BASED INFERENCE DETECTED');
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.warn('CPUs are heavily memory-bound for LLM inference.');
+    console.warn('Peak TOPS ratings do NOT translate to sustained throughput.');
+    console.warn('Realistic CPU utilization: 15-30% of peak TOPS');
+    console.warn('Memory bandwidth is the primary bottleneck.');
+    console.warn('Consider GPUs for production workloads >20B parameters.');
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
   
   // Convert boolean flag to modelName (skip if using custom model)
   const modelName = useCustomModel ? 'custom' : getModelNameFromParams(N, useMoeArchitecture);
@@ -485,6 +499,107 @@ export function calculateReverseInfrastructure(inputs: ReverseCalculatorInputs):
   // Overhead calculations
   let overheadMultiplier = 1.0;
   const overheadBreakdown: string[] = [];
+
+  // === CPU-specific sizing path (implements the step-by-step method) ===
+  if (isCPU) {
+    // Defaults (can be adjusted later / exposed in UI)
+    const TPS_CPU = inputs.cpuTps ?? 8; // conservative production decode throughput per CPU
+    const M_prefill = inputs.cpuPrefillMultiplier ?? 2.5; // effective prefill multiplier for long context
+    const U_target = inputs.cpuUtilizationTarget ?? 0.65; // target sustained utilization
+    const redundancy = inputs.cpuRedundancy ?? 1.15; // N+1 style redundancy
+    const AMX_efficiency = inputs.cpuAMXEfficiency ?? 0.2; // sustained AMX efficiency (0.15-0.25 recommended)
+    const modelRamOverhead = inputs.cpuModelRamOverhead ?? 1.2; // embeddings, scales, buffers multiplier
+
+    const notes: string[] = [];
+
+    // Step 0/1: Model placement (memory only)
+    // N is typically in billions in this codebase; convert to absolute params
+    const totalParamsAbsolute = N < 1000 ? (N * 1e9) : N; // fallback if user passed absolute
+    const modelRamGB = (totalParamsAbsolute / 1e9) * modelRamOverhead; // 1 byte per param baseline
+
+    // If cpuMemoryGB provided, validate 'fits on one Xeon' using that hint
+    let fitsOnSingleNode: boolean | undefined = undefined;
+    if (typeof cpuMemoryGB === 'number') {
+      fitsOnSingleNode = modelRamGB <= cpuMemoryGB;
+      notes.push(`Model RAM ${modelRamGB.toFixed(2)}GB vs node RAM ${cpuMemoryGB}GB -> ${fitsOnSingleNode ? 'fits' : 'does NOT fit'}`);
+    } else {
+      notes.push(`Model RAM ${modelRamGB.toFixed(2)}GB (no cpuMemoryGB provided; assume it can fit on typical Xeon with large RAM)`);
+    }
+
+    // Step 2: Base FLOPs per token (theoretical lower bound)
+    // FLOPs per token = 2 * P (P = absolute params)
+    const flopsPerToken = 2 * totalParamsAbsolute; // FLOPs per token (unit: FLOPs)
+    const flopsPerTokenGFLOPS = (flopsPerToken / 1e9); // in GFLOPs per token (for human readability)
+
+    // Derived total FLOPs/sec for target workload
+    const T_total = totalOutputTokensPerSec; // tokens/sec
+    const totalFlopsPerSec = flopsPerToken * T_total; // FLOPs/s
+
+    // Step 3: Use sustained AMX efficiency rather than peak
+    // Assumes hardwareOpsPerUnit is in FLOPs/s for a single CPU (same unit as other compute math)
+    const usableFlopsPerCPU = Math.max(1e-9, hardwareOpsPerUnit) * AMX_efficiency; // FLOPs/s
+
+    // Step 4: Compute-only CPU count (lower bound)
+    const cpusCompute = usableFlopsPerCPU > 0 ? (totalFlopsPerSec / usableFlopsPerCPU) : Infinity;
+
+    // Step 5: Decode throughput reality check (empirical)
+    const cpusDecode = T_total / TPS_CPU;
+
+    // Step 6: Long-context prefill penalty
+    const cpusWithPrefill = cpusDecode * M_prefill;
+
+    // Step 7: Utilization & headroom
+    const cpusUtil = cpusWithPrefill / U_target;
+
+    // Step 8: Redundancy & maintenance
+    const finalCPUs = cpusUtil * redundancy;
+    const finalCPUsRounded = Math.ceil(finalCPUs);
+
+    // Sanity check rule
+    const deliveredTPS = finalCPUsRounded * TPS_CPU * U_target;
+    const sanityPass = deliveredTPS >= T_total;
+
+    const headroom = ((deliveredTPS - T_total) / Math.max(1, T_total)) * 100;
+    const totalOverheadPercent = ((overheadMultiplier - 1) * 100);
+
+    // Add human readable breakdown to overhead
+    overheadBreakdown.push(`🖥️ CPU sizing path: TPS_CPU=${TPS_CPU}, M_prefill=${M_prefill}, U_target=${U_target}, Redundancy=${redundancy}`);
+    overheadBreakdown.push(`🔢 Compute lower bound (flops): ${cpusCompute.toFixed(1)} CPUs; decode-based: ${cpusDecode.toFixed(1)} CPUs`);
+    overheadBreakdown.push(`⚠️ Prefill x${M_prefill} -> ${cpusWithPrefill.toFixed(1)} CPUs; utilization -> ${cpusUtil.toFixed(1)} CPUs; final ≈ ${finalCPUsRounded} CPUs`);
+
+    const cpuSizing = {
+      modelRamGB: Number(modelRamGB.toFixed(3)),
+      fitsOnSingleNode,
+      flopsPerTokenGFLOPS: Number(flopsPerTokenGFLOPS.toFixed(3)),
+      totalFlopsTFLOPS: Number((totalFlopsPerSec / 1e12).toFixed(3)),
+      usableFlopsPerCPU: Number(usableFlopsPerCPU.toFixed(0)),
+      cpusCompute: Number(cpusCompute.toFixed(2)),
+      TPS_CPU,
+      cpusDecode: Number(cpusDecode.toFixed(2)),
+      M_prefill,
+      cpusWithPrefill: Number(cpusWithPrefill.toFixed(2)),
+      U_target,
+      cpusUtil: Number(cpusUtil.toFixed(2)),
+      redundancy,
+      finalCPUs: Number(finalCPUs.toFixed(2)),
+      finalCPUsRounded,
+      deliveredTPS: Number(deliveredTPS.toFixed(1)),
+      sanityPass,
+      notes
+    };
+
+    return {
+      unitsNeeded: finalCPUsRounded,
+      throughputPerUnit: TPS_CPU * U_target,
+      totalSystemThroughput: deliveredTPS,
+      headroom,
+      totalOverheadPercent,
+      overheadBreakdown,
+      cpuSizing
+    };
+  }
+  // === End CPU sizing path ===
+
   
   // Prefill overhead - only apply to NEW tokens being processed, not cached tokens
   const effectiveInputLength = tokenBreakdown ? tokens.newInputTokens : inputLength;

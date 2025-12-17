@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { calculateReverseInfrastructure } from '@/lib/calculations';
-import { calculateModelSize } from '@/lib/calculationParameters';
+import { calculateModelSize, isCPUHardware, cpuUtilizationFactor, gpuUtilizationFactor } from '@/lib/calculationParameters';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 interface UseCapacityCalculationProps {
@@ -23,6 +23,13 @@ interface UseCapacityCalculationProps {
   customActiveParams?: number;
   customTotalExperts?: number;
   customActiveExperts?: number;
+  // CPU overrides
+  cpuTps?: number;
+  cpuPrefillMultiplier?: number;
+  cpuUtilizationTarget?: number;
+  cpuRedundancy?: number;
+  cpuAMXEfficiency?: number;
+  cpuModelRamOverhead?: number;
 }
 
 export function useCapacityCalculation({
@@ -45,6 +52,13 @@ export function useCapacityCalculation({
   customActiveParams = 1,
   customTotalExperts = 8,
   customActiveExperts = 2,
+  // CPU-specific overrides
+  cpuTps,
+  cpuPrefillMultiplier,
+  cpuUtilizationTarget,
+  cpuRedundancy,
+  cpuAMXEfficiency,
+  cpuModelRamOverhead,
 }: UseCapacityCalculationProps) {
   return useMemo(() => {
     // Parse hardware ops (TFLOPS/POPS) - extract the numeric value correctly
@@ -74,6 +88,23 @@ export function useCapacityCalculation({
     // Get GPU memory from hardware database
     const selectedHardware = hardwareDatabase.find(hw => hw.value === hardware);
     const vramPerUnit = selectedHardware?.memory || 0;
+    const isCPU = selectedHardware?.type === 'cpu';
+    
+    // Apply CPU-specific utilization factor if using CPU
+    const effectiveUtilization = isCPU ? cpuUtilizationFactor : (utilization || gpuUtilizationFactor);
+    
+    // Disable KV offloading for CPUs (they already use system RAM)
+    const effectiveKvOffloading = isCPU ? false : kvOffloading;
+    const effectiveKvOffloadingPercentage = isCPU ? 0 : kvOffloadingPercentage;
+    
+    // Add warning for CPU hardware
+    if (isCPU && typeof window !== 'undefined') {
+      console.warn('⚠️ CPU-based inference detected. Applying realistic utilization factor:', effectiveUtilization);
+      console.warn('💡 CPUs are memory-bound for LLM inference. Consider GPUs for production workloads.');
+      if (kvOffloading) {
+        console.warn('ℹ️ KV offloading disabled: CPUs already use system RAM for all operations.');
+      }
+    }
     
     const results = calculateReverseInfrastructure({
       modelParams,
@@ -81,18 +112,27 @@ export function useCapacityCalculation({
       inputLength,
       tokensPerUser: tokensPerSec,
       hardwareOpsPerUnit,
-      utilization,
+      utilization: effectiveUtilization,
       quantType,
       tokenBreakdown,
       gpuMemoryGB: vramPerUnit,
-      kvOffloading,
-      kvOffloadingPercentage,
+      // Forward CPU overrides when present
+      cpuTps,
+      cpuPrefillMultiplier,
+      cpuUtilizationTarget,
+      cpuRedundancy,
+      cpuAMXEfficiency,
+      cpuModelRamOverhead,
+      kvOffloading: effectiveKvOffloading,
+      kvOffloadingPercentage: effectiveKvOffloadingPercentage,
       useMoeArchitecture,
       useCustomModel: effectiveUseCustomModel,
       customTotalParams,
       customActiveParams,
       customTotalExperts,
       customActiveExperts,
+      isCPU,
+      cpuMemoryGB: isCPU ? vramPerUnit : undefined,
     });
     
     // Calculate accumulated VRAM and FLOPS

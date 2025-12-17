@@ -25,13 +25,21 @@ export const MODEL_OPTIONS: ModelOption[] = [
   { value: '13.1', name: 'Llama 2 13B', params: 13 },
   { value: '13.2', name: 'Llama 3.1 13B', params: 13 },
   { value: '14', name: 'DeepSeek 14B', params: 14 },
+  { value: '20', name: 'Claude 3 Haiku (20B)', params: 20 },
+  { value: '24', name: 'Claude Haiku 4.5 (24B) ⚡ NEW', params: 24 },
   { value: '27', name: 'Gemma 2 27B', params: 27 },
   { value: '32', name: 'Qwen 2.5 32B', params: 32 },
   { value: '34', name: 'CodeLlama 34B', params: 34 },
+  { value: '40', name: 'Claude 4 Haiku (40B)', params: 40 },
   { value: '46.7', name: 'Mixtral 8x7B (46.7B)', params: 46.7 },
+  { value: '55', name: 'Claude 3.5 Sonnet (55B)', params: 55 },
+  { value: '60', name: 'Claude 4 Sonnet (60B)', params: 60 },
+  { value: '65', name: 'Claude 3 Sonnet (65B)', params: 65 },
   { value: '70', name: 'Llama 3.1 70B', params: 70 },
   { value: '72', name: 'Qwen 2.5 72B', params: 72 },
+  { value: '100', name: 'Claude 4 Opus (100B)', params: 100 },
   { value: '120', name: 'GPT OSS 120B (MoE)', params: 120 },
+  { value: '150', name: 'Claude 3 Opus (150B)', params: 150 },
   { value: '405', name: 'Llama 3.1 405B', params: 405 },
 ];
 
@@ -149,6 +157,10 @@ export const HARDWARE_FAMILIES = [
   'AMD MI300X',
   'Intel Gaudi 3',
   'Intel Gaudi 2',
+  'Intel Xeon 6 (6th Gen)',
+  'Intel Xeon 5th Gen',
+  'Intel Xeon 4th Gen',
+  'Intel Xeon 3rd Gen',
 ];
 
 export function getHardwareFamily(hardwareName: string): string {
@@ -164,6 +176,11 @@ export function getHardwareFamily(hardwareName: string): string {
   if (name.includes('mi300x')) return 'AMD MI300X';
   if (name.includes('gaudi 3')) return 'Intel Gaudi 3';
   if (name.includes('gaudi 2')) return 'Intel Gaudi 2';
+  // Intel Xeon CPUs
+  if (name.includes('xeon 6') || name.includes('6980') || name.includes('6972') || name.includes('6960') || name.includes('6952') || name.includes('6940')) return 'Intel Xeon 6 (6th Gen)';
+  if (name.includes('xeon') && (name.includes('8592') || name.includes('8580') || name.includes('8568') || name.includes('8558'))) return 'Intel Xeon 5th Gen';
+  if (name.includes('xeon') && (name.includes('8490') || name.includes('8480') || name.includes('8470') || name.includes('8460'))) return 'Intel Xeon 4th Gen';
+  if (name.includes('xeon') && (name.includes('8380') || name.includes('8368') || name.includes('8352'))) return 'Intel Xeon 3rd Gen';
   return 'Other';
 }
 

@@ -9,9 +9,30 @@ import {
   INFO_CONTENT 
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
+import { hardwareDatabase } from '@/lib/hardwareDatabase';
+
+// Safe number formatter - prevents NaN from being rendered
+function safeNum(value: number | undefined, decimals: number = 1): string {
+  if (value === undefined || isNaN(value) || !isFinite(value)) {
+    return 'N/A';
+  }
+  return value.toFixed(decimals);
+}
+
+// Get hardware type from hardware value string
+function getHardwareType(hardwareValue: string): 'gpu' | 'cpu' {
+  const hw = hardwareDatabase.find(h => h.value === hardwareValue);
+  return hw?.type || 'gpu'; // default to gpu for backwards compatibility
+}
+
+// Get memory label based on hardware type
+function getMemoryLabel(hardwareValue: string): string {
+  return getHardwareType(hardwareValue) === 'cpu' ? 'System RAM' : 'VRAM';
+}
 
 // Format FLOPS to readable units
 function formatFLOPS(flops: number): string {
+  if (isNaN(flops) || !isFinite(flops)) return 'N/A FLOPS';
   if (flops >= 1e15) {
     return `${(flops / 1e15).toFixed(2)} PFLOPS`;
   } else if (flops >= 1e12) {
@@ -23,7 +44,6 @@ function formatFLOPS(flops: number): string {
   }
 }
 
-// Export calculation results as professional PDF for client tenders
 async function exportToPDF(inputs: any, results: any) {
   try {
     const jsPDF = (await import('jspdf')).default;
@@ -38,6 +58,8 @@ async function exportToPDF(inputs: any, results: any) {
     const leftMargin = 20;
     const rightMargin = 190;
     const lineHeight = 7;
+    
+    const memoryLabel = getMemoryLabel(inputs.hardware);
     
     // Header
     pdf.setFillColor(16, 185, 129);
@@ -126,14 +148,14 @@ async function exportToPDF(inputs: any, results: any) {
       ['Total System Throughput:', `${results.totalSystemThroughput.toFixed(1)} tokens/sec`],
       ['Throughput per Unit:', `${results.throughputPerUnit.toFixed(1)} tokens/sec`],
       ['System Headroom:', `${results.headroom.toFixed(0)}%`],
-      ['Total VRAM:', `${results.totalVRAM.toFixed(0)} GB`],
-      ['VRAM per Unit:', `${results.vramPerUnit} GB`],
+      [`Total ${memoryLabel}:`, `${results.totalVRAM.toFixed(0)} GB`],
+      [`${memoryLabel} per Unit:`, `${results.vramPerUnit} GB`],
       ['Model Size:', `${results.modelSize.toFixed(1)} GB`],
     ];
     
     if (results.vramAllocation && results.vramAllocation.kvCacheGB > 0) {
       resultsData.push(['KV Cache Memory:', `${results.vramAllocation.kvCacheGB.toFixed(2)} GB`]);
-      resultsData.push(['Total VRAM per Unit:', `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
+      resultsData.push([`Total ${memoryLabel} per Unit:`, `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
     }
     
     if (results.vramAllocation && results.vramAllocation.offloadedMemoryGB !== undefined && results.vramAllocation.offloadedMemoryGB > 0) {
@@ -234,6 +256,21 @@ interface CapacityPlannerProps {
   setCustomTotalExpertsReverse: (value: number) => void;
   customActiveExpertsReverse: number;
   setCustomActiveExpertsReverse: (value: number) => void;
+  // CPU/GPU mode and CPU-specific overrides
+  calcMode: 'auto' | 'cpu' | 'gpu';
+  setCalcMode: (mode: 'auto' | 'cpu' | 'gpu') => void;
+  cpuTps: number;
+  setCpuTps: (value: number) => void;
+  cpuPrefillMultiplier: number;
+  setCpuPrefillMultiplier: (value: number) => void;
+  cpuUtilizationTarget: number;
+  setCpuUtilizationTarget: (value: number) => void;
+  cpuRedundancy: number;
+  setCpuRedundancy: (value: number) => void;
+  cpuAMXEfficiency: number;
+  setCpuAMXEfficiency: (value: number) => void;
+  cpuModelRamOverhead: number;
+  setCpuModelRamOverhead: (value: number) => void;
   results: {
     unitsNeeded: number;
     throughputPerUnit: number;
@@ -281,6 +318,27 @@ interface CapacityPlannerProps {
       };
       recommendations: string[];
     };
+    // CPU sizing results (when CPU path is used)
+    cpuSizing?: {
+      modelRamGB: number;
+      fitsOnSingleNode?: boolean;
+      flopsPerTokenGFLOPS: number;
+      totalFlopsTFLOPS: number;
+      usableFlopsPerCPU?: number;
+      cpusCompute: number;
+      TPS_CPU: number;
+      cpusDecode: number;
+      M_prefill: number;
+      cpusWithPrefill: number;
+      U_target: number;
+      cpusUtil: number;
+      redundancy: number;
+      finalCPUs: number;
+      finalCPUsRounded: number;
+      deliveredTPS: number;
+      sanityPass: boolean;
+      notes?: string[];
+    };
   };
 }
 
@@ -323,12 +381,31 @@ export default function CapacityPlanner({
   setCustomTotalExpertsReverse,
   customActiveExpertsReverse,
   setCustomActiveExpertsReverse,
+  // CPU/GPU mode & CPU overrides
+  calcMode,
+  setCalcMode,
+  cpuTps,
+  setCpuTps,
+  cpuPrefillMultiplier,
+  setCpuPrefillMultiplier,
+  cpuUtilizationTarget,
+  setCpuUtilizationTarget,
+  cpuRedundancy,
+  setCpuRedundancy,
+  cpuAMXEfficiency,
+  setCpuAMXEfficiency,
+  cpuModelRamOverhead,
+  setCpuModelRamOverhead,
   results,
 }: CapacityPlannerProps) {
   const hardwareGroups = useHardwareGroups(quantization);
   
   // Calculate effective model params for display
   const effectiveModelParams = (useCustomModelReverse || model === 'custom') ? customTotalParamsReverse : parseFloat(model);
+  
+  // Detect if CPU hardware is selected
+  const selectedHW = hardwareDatabase.find(hw => hw.value === hardware);
+  const isCPU = selectedHW?.type === 'cpu';
   
   // Debug log to check if vramAllocation exists
   if (typeof window !== 'undefined') {
@@ -338,12 +415,55 @@ export default function CapacityPlanner({
       vramAllocation: results.vramAllocation,
       kvCache: results.kvCache,
       useKVCache,
+      isCPU,
       allResults: results
     });
   }
   
   return (
     <div className="calc-grid">
+      {/* CPU Warning Banner */}
+      {isCPU && (
+        <div style={{
+          gridColumn: '1 / -1',
+          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+          border: '3px solid #f59e0b',
+          borderRadius: '12px',
+          padding: '20px',
+          marginBottom: '24px',
+          boxShadow: '0 4px 6px rgba(245, 158, 11, 0.1)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'start', gap: '16px' }}>
+            <div style={{ fontSize: '32px' }}>⚠️</div>
+            <div style={{ flex: 1 }}>
+              <h4 style={{ 
+                color: '#92400e', 
+                margin: '0 0 12px 0', 
+                fontSize: '18px', 
+                fontWeight: '700' 
+              }}>
+                CPU-Based Inference Detected
+              </h4>
+              <div style={{ color: '#78350f', lineHeight: '1.6', fontSize: '14px' }}>
+                <p style={{ margin: '0 0 8px 0' }}>
+                  <strong>Reality Check:</strong> CPUs are heavily memory-bound for LLM inference. 
+                  Peak TOPS ratings do NOT translate to sustained throughput.
+                </p>
+                <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                  <li>Realistic utilization: <strong>15-30%</strong> of peak TOPS (auto-applied)</li>
+                  <li>Memory bandwidth is the primary bottleneck (DDR5: ~307 GB/s)</li>
+                  <li>Best for: Small models (&lt;20B params), dev/testing, cost optimization</li>
+                  <li>Production workloads &gt;20B params: <strong>Consider GPUs</strong></li>
+                </ul>
+                <p style={{ margin: '8px 0 0 0', fontStyle: 'italic' }}>
+                  💡 These calculations apply realistic CPU constraints. Unit counts may be significantly higher than GPU equivalents.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Input Panel */}
       <div className="calc-input-panel">
         <h3 style={{ 
@@ -360,6 +480,16 @@ export default function CapacityPlanner({
           Requirements
         </h3>
         
+        <div className="input-group">
+          <label style={{ display: 'block', marginBottom: 8 }}>Compute Mode</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setCalcMode('auto')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'auto' ? '#10b981' : '#f1f5f9', color: calcMode === 'auto' ? '#fff' : '#0f172a' }}>Auto</button>
+            <button onClick={() => setCalcMode('gpu')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'gpu' ? '#10b981' : '#f1f5f9', color: calcMode === 'gpu' ? '#fff' : '#0f172a' }}>GPU</button>
+            <button onClick={() => setCalcMode('cpu')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'cpu' ? '#10b981' : '#f1f5f9', color: calcMode === 'cpu' ? '#fff' : '#0f172a' }}>CPU</button>
+          </div>
+          <small style={{ display: 'block', marginTop: 6, color: '#64748b' }}>Choose CPU to force CPU-based sizing or GPU for GPU sizing; Auto uses hardware selection.</small>
+        </div>
+
         <div className="input-group">
           <label htmlFor="reverse_model">Model Size</label>
           <select id="reverse_model" value={model} onChange={(e) => {
@@ -540,9 +670,24 @@ export default function CapacityPlanner({
           <small style={{ display: 'block', marginTop: '8px', marginLeft: '30px' }}>
             Split tokens into per-session (cached) and per-request (new) for accurate compute modeling
           </small>
+          
+          {isCPU && (
+            <div style={{ 
+              marginTop: '12px', 
+              padding: '12px',
+              background: 'rgba(59, 130, 246, 0.1)',
+              borderRadius: '8px',
+              fontSize: '13px',
+              color: '#1e40af',
+              border: '2px solid rgba(59, 130, 246, 0.2)'
+            }}>
+              ℹ️ <strong>Note:</strong> KV cache offloading is not available for CPU-only inference. 
+              CPUs already use system RAM for all operations (model weights + KV cache).
+            </div>
+          )}
         </div>
 
-        {useKVCache && (
+        {useKVCache && !isCPU && (
           <div className="input-group" style={{ 
             background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(37, 99, 235, 0.05) 100%)',
             padding: '16px',
@@ -688,14 +833,57 @@ export default function CapacityPlanner({
           <small>{HELPER_TEXT.outputRateNote}</small>
         </div>
 
+        {calcMode === 'cpu' && (
+          <div style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.03) 0%, rgba(59,130,246,0.02) 100%)', padding: 16, borderRadius: 8, border: '2px solid rgba(59,130,246,0.06)', marginBottom: 12 }}>
+            <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>CPU Configuration (overrides)</h4>
+            <div className="input-group">
+              <label htmlFor="cpu_tps">TPS per CPU (decode)</label>
+              <input id="cpu_tps" type="number" value={cpuTps} onChange={(e) => setCpuTps(parseFloat(e.target.value) || 0)} step={1} min={1} />
+              <small>Empirical tokens/sec per CPU (default: 8)</small>
+            </div>
+            <div className="input-group">
+              <label htmlFor="cpu_prefill">Prefill multiplier (M_prefill)</label>
+              <input id="cpu_prefill" type="number" value={cpuPrefillMultiplier} onChange={(e) => setCpuPrefillMultiplier(parseFloat(e.target.value) || 1)} step={0.1} min={1} />
+              <small>Long-context prefill cost multiplier (default: 2.5)</small>
+            </div>
+            <div className="input-group">
+              <label htmlFor="cpu_util">Target utilization (U_target)</label>
+              <input id="cpu_util" type="number" value={cpuUtilizationTarget} onChange={(e) => setCpuUtilizationTarget(parseFloat(e.target.value) || 0.1)} step={0.01} min={0.1} max={1} />
+              <small>Typical sustained utilization (default: 0.65)</small>
+            </div>
+            <div className="input-group">
+              <label htmlFor="cpu_redundancy">Redundancy multiplier</label>
+              <input id="cpu_redundancy" type="number" value={cpuRedundancy} onChange={(e) => setCpuRedundancy(parseFloat(e.target.value) || 1)} step={0.01} min={1} />
+              <small>N+1 redundancy factor (default: 1.15)</small>
+            </div>
+            <div className="input-group">
+              <label htmlFor="cpu_amx">AMX sustained efficiency</label>
+              <input id="cpu_amx" type="number" value={cpuAMXEfficiency} onChange={(e) => setCpuAMXEfficiency(parseFloat(e.target.value) || 0.15)} step={0.01} min={0} max={1} />
+              <small>Sustained AMX efficiency to use instead of peak (0.15-0.25 recommended)</small>
+            </div>
+            <div className="input-group">
+              <label htmlFor="cpu_model_overhead">Model RAM overhead</label>
+              <input id="cpu_model_overhead" type="number" value={cpuModelRamOverhead} onChange={(e) => setCpuModelRamOverhead(parseFloat(e.target.value) || 1)} step={0.01} min={1} />
+              <small>Memory overhead for embeddings/scales/buffers (default: 1.2)</small>
+            </div>
+          </div>
+        )}
+
         <div className="input-group">
           <label htmlFor="reverse_hardware">Target Hardware</label>
           <select id="reverse_hardware" value={hardware} onChange={(e) => setHardware(e.target.value)}>
             {hardwareGroups.map((group: any) => (
               <optgroup key={group.family} label={group.family}>
-                {group.options.map((hw: any, idx: number) => (
-                  <option key={idx} value={hw.value}>{hw.name} - {hw.memory}GB</option>
-                ))}
+                {group.options.map((hw: any, idx: number) => {
+                  const memDisplay = hw.type === 'cpu' 
+                    ? `(Max: ${hw.memory >= 1000 ? (hw.memory / 1000).toFixed(1) + 'TB' : hw.memory + 'GB'} DDR5)` 
+                    : `- ${hw.memory}GB VRAM`;
+                  return (
+                    <option key={idx} value={hw.value}>
+                      {hw.name} {memDisplay}
+                    </option>
+                  );
+                })}
               </optgroup>
             ))}
           </select>
@@ -856,7 +1044,7 @@ export default function CapacityPlanner({
                   <span style={{ fontWeight: '600' }}>{(results.vramAllocation.kvCacheGB * users).toFixed(2)} GB</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Total VRAM per Unit (Model + All KV + Buffer):</span>
+                  <span style={{ color: '#64748b' }}>Total {getMemoryLabel(hardware)} per Unit (Model + All KV + Buffer):</span>
                   <span style={{ fontWeight: '600' }}>{(results.modelSize + (results.vramAllocation.kvCacheGB * users) + results.vramAllocation.safetyBufferGB).toFixed(1)} GB</span>
                 </div>
               </>
@@ -891,8 +1079,28 @@ export default function CapacityPlanner({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
               <span style={{ color: '#64748b' }}>Hardware Units Needed:</span>
-              <span style={{ fontWeight: '600', fontSize: '18px', color: '#10b981' }}>{results.unitsNeeded}</span>
+              <span style={{ fontWeight: '600', fontSize: '18px', color: '#10b981' }}>{isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded}</span>
             </div>
+            {isCPU && results.cpuSizing && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
+                  <span style={{ color: '#64748b' }}>Model RAM (with overhead):</span>
+                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.modelRamGB} GB</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
+                  <span style={{ color: '#64748b' }}>Final CPUs (N+1, rounded):</span>
+                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.finalCPUsRounded}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
+                  <span style={{ color: '#64748b' }}>Delivered TPS (safety applied):</span>
+                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.deliveredTPS} t/s</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
+                  <span style={{ color: '#64748b' }}>Sanity Check:</span>
+                  <span style={{ fontWeight: '600', color: results.cpuSizing.sanityPass ? '#059669' : '#b91c1c' }}>{results.cpuSizing.sanityPass ? 'PASS' : 'FAIL'}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -900,38 +1108,38 @@ export default function CapacityPlanner({
         <div className="result-card">
           <div className="result-content">
             <div className="result-label">Total System Throughput</div>
-            <div className="result-value">{results.totalSystemThroughput.toFixed(1)} t/s</div>
+            <div className="result-value">{safeNum(results.totalSystemThroughput, 1)} t/s</div>
             <div className="result-sublabel">
-              ({results.throughputPerUnit.toFixed(1)} tokens/sec per unit, {results.headroom.toFixed(0)}% spare capacity)
+              ({safeNum(results.throughputPerUnit, 1)} tokens/sec per unit, {safeNum(results.headroom, 0)}% spare capacity)
             </div>
           </div>
         </div>
 
         <div className="result-card">
           <div className="result-content">
-            <div className="result-label">Total VRAM Accumulated</div>
+            <div className="result-label">Total {getMemoryLabel(hardware)} Accumulated</div>
             <div className="result-value">{results.totalVRAM.toFixed(0)} GB</div>
             <div className="result-sublabel">
               Model Size: {results.modelSize.toFixed(1)} GB ({quantization.toUpperCase()}) per unit
               {results.vramAllocation && results.vramAllocation.kvCacheGB > 0 && (
                 <>
                   <br/>
-                  + KV Cache: {results.vramAllocation.kvCacheGB.toFixed(2)} GB per unit
+                  + KV Cache: {safeNum(results.vramAllocation.kvCacheGB, 2)} GB per unit
                 </>
               )}
               <br/>
-              ({results.vramPerUnit} GB × {results.unitsNeeded} units)
+              ({safeNum(results.vramPerUnit, 1)} GB × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units)
             </div>
             {results.vramAllocation && results.vramAllocation.kvCacheGB > 0 ? (
               <div className="result-equation">
-                Per unit: {results.vramAllocation.modelWeightsGB.toFixed(1)} GB (model) + 
-                {results.vramAllocation.kvCacheGB.toFixed(2)} GB (KV) + 
-                {results.vramAllocation.safetyBufferGB.toFixed(1)} GB (buffer) = 
-                {results.vramAllocation.totalUsedGB.toFixed(1)} GB × {results.unitsNeeded} units
+                Per unit: {safeNum(results.vramAllocation.modelWeightsGB, 1)} GB (model) + 
+                {safeNum(results.vramAllocation.kvCacheGB, 2)} GB (KV) + 
+                {safeNum(results.vramAllocation.safetyBufferGB, 1)} GB (buffer) = 
+                {isNaN(results.vramAllocation.totalUsedGB) ? 'N/A' : results.vramAllocation.totalUsedGB.toFixed(1)} GB × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units
               </div>
             ) : (
               <div className="result-equation">
-                Model: {results.modelSize.toFixed(1)} GB after {quantization.toUpperCase()} × {results.unitsNeeded} units = {results.totalVRAM.toFixed(0)} GB total
+                Model: {isNaN(results.modelSize) ? 'N/A' : results.modelSize.toFixed(1)} GB after {quantization.toUpperCase()} × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units = {isNaN(results.totalVRAM) ? 'N/A' : results.totalVRAM.toFixed(0)} GB total
               </div>
             )}
           </div>

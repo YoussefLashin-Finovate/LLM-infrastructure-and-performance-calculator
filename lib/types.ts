@@ -112,6 +112,27 @@ export interface CalculatorResults {
   decodeThroughput?: number;
 }
 
+export interface CPUSizingResult {
+  modelRamGB: number;
+  fitsOnSingleNode?: boolean;
+  flopsPerTokenGFLOPS: number;
+  totalFlopsTFLOPS: number;
+  usableFlopsPerCPU?: number; // in FLOPs/s (same unit as hardwareOpsPerUnit)
+  cpusCompute: number;
+  TPS_CPU: number;
+  cpusDecode: number;
+  M_prefill: number;
+  cpusWithPrefill: number;
+  U_target: number;
+  cpusUtil: number;
+  redundancy: number;
+  finalCPUs: number;
+  finalCPUsRounded: number;
+  deliveredTPS: number;
+  sanityPass: boolean;
+  notes?: string[];
+}
+
 export interface ReverseCalculatorInputs {
   modelParams: number;
   users: number;
@@ -124,6 +145,15 @@ export interface ReverseCalculatorInputs {
   tokenBreakdown?: TokenBreakdown;
   coldStartRate?: number;
   gpuMemoryGB?: number;
+  // Optional CPU memory hint (GB) to validate model placement on single server
+  cpuMemoryGB?: number;
+  // Optional CPU-specific config overrides
+  cpuTps?: number; // TPS per CPU (decode throughput)
+  cpuPrefillMultiplier?: number; // M_prefill
+  cpuUtilizationTarget?: number; // U_target
+  cpuRedundancy?: number; // redundancy factor
+  cpuAMXEfficiency?: number; // AMX sustained efficiency
+  cpuModelRamOverhead?: number; // model RAM overhead multiplier
   kvOffloading?: boolean;
   kvOffloadingPercentage?: number; // 0-100: percentage of KV cache to offload to CPU/NVMe
   // MoE-specific fields
@@ -135,6 +165,8 @@ export interface ReverseCalculatorInputs {
   customActiveParams?: number;
   customTotalExperts?: number;
   customActiveExperts?: number;
+  // Hardware type
+  isCPU?: boolean; // true if CPU-based hardware, false/undefined for GPU
 }
 
 export interface ReverseCalculatorResults {
@@ -144,6 +176,8 @@ export interface ReverseCalculatorResults {
   headroom: number;
   totalOverheadPercent: number;
   overheadBreakdown: string[];
+  // Optional CPU-specific sizing results
+  cpuSizing?: CPUSizingResult;
   // Optional token-aware results
   tokenCosts?: TokenComputeCosts;
   kvCache?: KVCacheState;

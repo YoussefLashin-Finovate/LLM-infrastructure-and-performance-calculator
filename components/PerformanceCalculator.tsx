@@ -11,6 +11,17 @@ import {
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
 
+// Get hardware type from hardware value string
+function getHardwareType(hardwareValue: string): 'gpu' | 'cpu' {
+  const hw = hardwareDatabase.find(h => h.value === hardwareValue);
+  return hw?.type || 'gpu'; // default to gpu for backwards compatibility
+}
+
+// Get memory label based on hardware type
+function getMemoryLabel(hardwareValue: string): string {
+  return getHardwareType(hardwareValue) === 'cpu' ? 'System RAM' : 'VRAM';
+}
+
 // Format FLOPS to readable units
 function formatFLOPS(flops: number): string {
   if (flops >= 1e15) {
@@ -73,12 +84,13 @@ async function exportToPDF(inputs: any, results: any) {
     pdf.setFont('helvetica', 'normal');
     
     const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
+    const memoryLabel = selectedHW ? getMemoryLabel(selectedHW.value) : 'VRAM';
     
     const configData = [
       ['Model Size:', `${parseFloat(inputs.model).toFixed(1)}B parameters`],
       ['Quantization:', inputs.quantization.toUpperCase()],
       ['Hardware:', selectedHW?.name || 'N/A'],
-      ['Hardware VRAM:', `${selectedHW?.memory || 'N/A'} GB`],
+      [`Hardware ${memoryLabel}:`, `${selectedHW?.memory || 'N/A'} GB`],
       ['Hardware FLOPS:', formatFLOPS(parseFloat(inputs.hardware.split(',')[0]) * 1e12)],
       ['Utilization Factor:', `${(inputs.utilization * 100).toFixed(0)}%`],
       ['Input Length:', `${inputs.inputLength} tokens`],
@@ -130,11 +142,11 @@ async function exportToPDF(inputs: any, results: any) {
     
     if (results.vramAllocation && results.vramAllocation.kvCacheGB > 0) {
       metricsData.push(['KV Cache Memory:', `${results.vramAllocation.kvCacheGB.toFixed(2)} GB`]);
-      metricsData.push(['Total VRAM Used:', `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
+      metricsData.push([`Total ${memoryLabel} Used:`, `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
     }
     
     metricsData.push(
-      ['Available VRAM:', `${selectedHW?.memory || 'N/A'} GB`],
+      [`Available ${memoryLabel}:`, `${selectedHW?.memory || 'N/A'} GB`],
       ['Memory Bound:', results.isMemoryBound ? 'Yes' : 'No'],
     );
     
@@ -478,9 +490,16 @@ export default function PerformanceCalculator({
           <select id="calc_hardware" value={hardware} onChange={(e) => setHardware(e.target.value)}>
             {hardwareGroups.map((group: any) => (
               <optgroup key={group.family} label={group.family}>
-                {group.options.map((hw: any, idx: number) => (
-                  <option key={idx} value={hw.value}>{hw.name} - {hw.memory}GB</option>
-                ))}
+                {group.options.map((hw: any, idx: number) => {
+                  const memDisplay = hw.type === 'cpu' 
+                    ? `(Max: ${hw.memory >= 1000 ? (hw.memory / 1000).toFixed(1) + 'TB' : hw.memory + 'GB'} DDR5)` 
+                    : `- ${hw.memory}GB VRAM`;
+                  return (
+                    <option key={idx} value={hw.value}>
+                      {hw.name} {memDisplay}
+                    </option>
+                  );
+                })}
               </optgroup>
             ))}
           </select>
@@ -726,7 +745,8 @@ export default function PerformanceCalculator({
             <div className="result-label">Hardware Resources</div>
             <div className="result-value">{(() => {
               const selectedHW = hardwareDatabase.find(hw => hw.value === hardware);
-              return selectedHW ? `${selectedHW.memory} GB VRAM` : 'N/A';
+              const memLabel = selectedHW ? getMemoryLabel(selectedHW.value) : 'VRAM';
+              return selectedHW ? `${selectedHW.memory} GB ${memLabel}` : 'N/A';
             })()}</div>
             <div className="result-sublabel">
               Model Size: {modelSizeGB.toFixed(1)} GB ({quantization.toUpperCase()})
@@ -743,7 +763,7 @@ export default function PerformanceCalculator({
                   Model Weights: {vramAllocation.modelWeightsGB.toFixed(1)} GB + 
                   KV Cache: {vramAllocation.kvCacheGB.toFixed(2)} GB + 
                   Safety Buffer: {vramAllocation.safetyBufferGB.toFixed(1)} GB = 
-                  {vramAllocation.totalUsedGB.toFixed(1)} GB total VRAM needed
+                  {vramAllocation.totalUsedGB.toFixed(1)} GB total {getMemoryLabel(hardware)} needed
                 </>
               ) : (
                 <>

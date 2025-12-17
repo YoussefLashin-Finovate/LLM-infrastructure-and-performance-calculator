@@ -86,6 +86,17 @@ export default function AdvancedCalculator() {
     customActiveExperts,
   });
 
+  // Calculation mode (auto / cpu / gpu)
+  const [calcMode, setCalcMode] = useState<'auto'|'cpu'|'gpu'>('auto');
+  const [cpuTps, setCpuTps] = useState<number>(8);
+  const [cpuPrefillMultiplier, setCpuPrefillMultiplier] = useState<number>(2.5);
+  const [cpuUtilizationTarget, setCpuUtilizationTarget] = useState<number>(0.65);
+  const [cpuRedundancy, setCpuRedundancy] = useState<number>(1.15);
+  const [cpuAMXEfficiency, setCpuAMXEfficiency] = useState<number>(0.2);
+  const [cpuModelRamOverhead, setCpuModelRamOverhead] = useState<number>(1.2);
+
+
+
   const capacityResults = useCapacityCalculation({
     model: reverseModel,
     hardware: reverseHardware,
@@ -106,12 +117,30 @@ export default function AdvancedCalculator() {
     customActiveParams: reverseCustomActiveParams,
     customTotalExperts: reverseCustomTotalExperts,
     customActiveExperts: reverseCustomActiveExperts,
+    // Forward CPU overrides
+    cpuTps,
+    cpuPrefillMultiplier,
+    cpuUtilizationTarget,
+    cpuRedundancy,
+    cpuAMXEfficiency,
+    cpuModelRamOverhead,
   });
 
   // Hardware filtering hooks
   const { available: availableHardware } = useHardwareFilter(quantization);
   const { available: availableReverseHardware } = useHardwareFilter(reverseQuantization);
 
+  // Auto-select hardware when user forces CPU/GPU mode
+  useEffect(() => {
+    if (calcMode === 'cpu') {
+      const cpuOption = availableReverseHardware.find(hw => hw.type === 'cpu' && hw.quantTypes.includes(reverseQuantization));
+      if (cpuOption) setReverseHardware(cpuOption.value);
+    }
+    if (calcMode === 'gpu') {
+      const gpuOption = availableReverseHardware.find(hw => hw.type === 'gpu' && hw.quantTypes.includes(reverseQuantization));
+      if (gpuOption) setReverseHardware(gpuOption.value);
+    }
+  }, [calcMode, reverseQuantization, availableReverseHardware]);
 
 
   // Auto-select compatible hardware when quantization changes
@@ -284,6 +313,21 @@ export default function AdvancedCalculator() {
           setCustomTotalExpertsReverse={setReverseCustomTotalExperts}
           customActiveExpertsReverse={reverseCustomActiveExperts}
           setCustomActiveExpertsReverse={setReverseCustomActiveExperts}
+          // CPU / GPU mode & CPU config
+          calcMode={calcMode}
+          setCalcMode={setCalcMode}
+          cpuTps={cpuTps}
+          setCpuTps={setCpuTps}
+          cpuPrefillMultiplier={cpuPrefillMultiplier}
+          setCpuPrefillMultiplier={setCpuPrefillMultiplier}
+          cpuUtilizationTarget={cpuUtilizationTarget}
+          setCpuUtilizationTarget={setCpuUtilizationTarget}
+          cpuRedundancy={cpuRedundancy}
+          setCpuRedundancy={setCpuRedundancy}
+          cpuAMXEfficiency={cpuAMXEfficiency}
+          setCpuAMXEfficiency={setCpuAMXEfficiency}
+          cpuModelRamOverhead={cpuModelRamOverhead}
+          setCpuModelRamOverhead={setCpuModelRamOverhead}
           results={capacityResults}
         />
       )}
