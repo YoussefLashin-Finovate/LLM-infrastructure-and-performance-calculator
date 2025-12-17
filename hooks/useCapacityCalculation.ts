@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { calculateReverseInfrastructure } from '@/lib/calculations';
-import { calculateModelSize, isCPUHardware, cpuUtilizationFactor, gpuUtilizationFactor } from '@/lib/calculationParameters';
+import { calculateModelSize, isCPUHardware, gpuUtilizationFactor } from '@/lib/calculationParameters';
+
+const CPU_UTILIZATION_DEFAULT = 0.25;
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 interface UseCapacityCalculationProps {
@@ -91,7 +93,7 @@ export function useCapacityCalculation({
     const isCPU = selectedHardware?.type === 'cpu';
     
     // Apply CPU-specific utilization factor if using CPU
-    const effectiveUtilization = isCPU ? cpuUtilizationFactor : (utilization || gpuUtilizationFactor);
+    const effectiveUtilization = isCPU ? (cpuUtilizationTarget ?? CPU_UTILIZATION_DEFAULT) : (utilization || gpuUtilizationFactor);
     
     // Disable KV offloading for CPUs (they already use system RAM)
     const effectiveKvOffloading = isCPU ? false : kvOffloading;

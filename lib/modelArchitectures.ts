@@ -419,3 +419,7 @@ export function getVRAMParameters(
   
   return sharedParams + (expertParams / numShards);
 }
+
+// Deprecated legacy file: re-export new modular implementation
+// The real implementations live under `lib/modelArchitectures/*`.
+export * from './modelArchitectures/index';

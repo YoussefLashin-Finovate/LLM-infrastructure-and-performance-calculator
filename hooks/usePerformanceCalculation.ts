@@ -41,17 +41,32 @@ export function usePerformanceCalculation({
   customActiveExperts = 2,
 }: UsePerformanceCalculationProps) {
   return useMemo(() => {
-    // Parse hardware ops (TFLOPS/POPS) - extract the numeric value correctly
-    const opsString = hardware.split(',')[0].split('-').pop() || '0';
-    let hardwareOps = parseFloat(opsString);
-    
-    // Convert to FLOPS based on quantization type
-    const quantType = hardware.split(',')[1] as 'fp16' | 'int8' | 'int4';
-    if (quantType === 'int8' || quantType === 'int4') {
-      hardwareOps = hardwareOps * 1e12; // TOPS/POPS to OPS
+    // Parse hardware ops (supports suffixes K/M/G/T/P). If no suffix given we assume T (tera) units
+    const opsRaw = (hardware.split(',')[0].split('-').pop() || '0').toString().trim();
+    // Match number with optional suffix (K, M, G, T, P) - case-insensitive
+    const match = opsRaw.toUpperCase().match(/^([0-9]*\.?[0-9]+)\s*([KMGTP])?$/);
+    let hardwareOps = 0;
+    if (match) {
+      const val = parseFloat(match[1]);
+      const suffix = match[2] || 'T'; // default to T (tera) when unspecified
+      const scaleMap: { [key: string]: number } = {
+        K: 1e3,
+        M: 1e6,
+        G: 1e9,
+        T: 1e12,
+        P: 1e15,
+      };
+      hardwareOps = val * (scaleMap[suffix] || 1e12);
     } else {
-      hardwareOps = hardwareOps * 1e12; // TFLOPS to FLOPS
+      // Fallback: treat as tera (T)
+      hardwareOps = parseFloat(opsRaw) * 1e12;
     }
+
+    // Quantization type (if encoded in hardware value) — e.g. 'h100-3958,int8'
+    const quantTypeRaw = (hardware.split(',')[1] || '') as string;
+    const quantType = (quantTypeRaw === 'fp16' || quantTypeRaw === 'int8' || quantTypeRaw === 'int4') ? (quantTypeRaw as 'fp16' | 'int8' | 'int4') : 'fp16';
+    // Note: TOPS/Tera-scaling is already handled above based on suffix or implied T
+
     
     // Build token breakdown if KV cache is enabled
     const tokenBreakdown = useKVCache ? {

@@ -10,6 +10,7 @@ import {
   INFO_CONTENT
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
+import QuantizationSelect from '@/components/QuantizationSelect';
 
 // Get hardware type from hardware value string
 function getHardwareType(hardwareValue: string): 'gpu' | 'cpu' {
@@ -464,17 +465,11 @@ export default function PerformanceCalculator({
         </div>
 
         <div className="space-y-2 mb-6">
-          <label htmlFor="calc_quantization" className="block text-sm font-semibold text-slate-700">Quantization Level</label>
-          <select
+          <QuantizationSelect
             id="calc_quantization"
-            value={quantization}
-            onChange={(e) => setQuantization(e.target.value)}
-            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {QUANTIZATION_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.name}</option>
-            ))}
-          </select>
+            value={quantization as import('@/lib/types').QuantizationType}
+            onChange={(v) => setQuantization(v)}
+          />
           <p className="text-xs text-slate-500">{HELPER_TEXT.quantizationNote}</p>
         </div>
 

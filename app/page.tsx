@@ -9,8 +9,8 @@ import AdvancedCalculator from '@/components/AdvancedCalculator';
 import FooterSections from '@/components/FooterSections';
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
 import { speedBoosts, qualityImpact, quantSpec } from '@/lib/constants';
-import { hardwareDatabase } from '@/lib/hardwareDatabase';
-import { QUANTIZATION_OPTIONS, getHardwareFamily, HARDWARE_FAMILIES } from '@/lib/config';
+import HardwareSelect from '@/components/HardwareSelect';
+import QuantizationSelect from '@/components/QuantizationSelect';
 import { cn } from '@/lib/utils';
 
 export default function Home() {
@@ -76,69 +76,22 @@ export default function Home() {
               activeView === 'chart' ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1 md:grid-cols-2"
             )}>
               <div className="space-y-2">
-                <label htmlFor="hardware" className="block text-sm font-semibold text-slate-700 uppercase tracking-wide">
-                  Hardware Configuration
-                </label>
-                <div className="relative">
-                  <select
-                    id="hardware"
-                    value={hardware}
-                    onChange={(e) => setHardware(e.target.value as HardwareType)}
-                    className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow appearance-none"
-                  >
-                    {(() => {
-                      // Group hardware by family
-                      const groups: { [key: string]: typeof hardwareDatabase } = {};
-                      hardwareDatabase.forEach(hw => {
-                        const family = getHardwareFamily(hw.name);
-                        if (!groups[family]) groups[family] = [];
-                        groups[family].push(hw);
-                      });
-
-                      return HARDWARE_FAMILIES.map(family => {
-                        if (!groups[family]) return null;
-                        return (
-                          <optgroup key={family} label={family} className="font-semibold text-slate-900 bg-slate-50">
-                            {groups[family].map((hw, idx) => (
-                              <option key={idx} value={hw.value} className="text-slate-700 bg-white">
-                                {hw.name} - {hw.memory}GB
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      });
-                    })()}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                    <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                      <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd" />
-                    </svg>
-                  </div>
-                </div>
+                <div>
+                <HardwareSelect
+                  id="hardware"
+                  value={hardware}
+                  onChange={(v) => setHardware(v as HardwareType)}
+                  quantization={quantization}
+                />
+              </div>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="quantization" className="block text-sm font-semibold text-slate-700 uppercase tracking-wide">
-                  Quantization Level
-                </label>
-                <div className="relative">
-                  <select
-                    id="quantization"
-                    value={quantization}
-                    onChange={(e) => setQuantization(e.target.value as QuantizationType)}
-                    className="w-full px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow appearance-none"
-                  >
-                    <option value="fp16">FP16 (Full Precision - Highest Quality)</option>
-                    <option value="int8">INT8 (Balanced - Good Quality)</option>
-                    <option value="q4_k_s">Q4_K_S (Optimized - CPU Compatible)</option>
-                    <option value="int4">INT4 (Optimized - Best Performance)</option>
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                    <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                      <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" fillRule="evenodd" />
-                    </svg>
-                  </div>
-                </div>
+              <div>
+                <QuantizationSelect
+                  id="quantization"
+                  value={quantization}
+                  onChange={(v) => setQuantization(v as QuantizationType)}
+                />
               </div>
 
               {activeView === 'chart' && (

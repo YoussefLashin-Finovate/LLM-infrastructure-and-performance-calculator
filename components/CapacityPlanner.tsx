@@ -9,6 +9,7 @@ import {
   INFO_CONTENT
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
+import QuantizationSelect from '@/components/QuantizationSelect';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 // Safe number formatter - prevents NaN from being rendered
@@ -257,8 +258,8 @@ interface CapacityPlannerProps {
   customActiveExpertsReverse: number;
   setCustomActiveExpertsReverse: (value: number) => void;
   // CPU/GPU mode and CPU-specific overrides
-  calcMode: 'auto' | 'cpu' | 'gpu';
-  setCalcMode: (mode: 'auto' | 'cpu' | 'gpu') => void;
+  calcMode: 'cpu' | 'gpu';
+  setCalcMode: (mode: 'cpu' | 'gpu') => void;
   cpuTps: number;
   setCpuTps: (value: number) => void;
   cpuPrefillMultiplier: number;
@@ -465,12 +466,6 @@ export default function CapacityPlanner({
           <label className="block text-sm font-semibold text-slate-700">Compute Mode</label>
           <div className="flex gap-2 p-1 bg-slate-100/80 rounded-lg w-fit">
             <button
-              onClick={() => setCalcMode('auto')}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all shadow-sm ${calcMode === 'auto' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50 shadow-none'}`}
-            >
-              Auto
-            </button>
-            <button
               onClick={() => setCalcMode('gpu')}
               className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all shadow-sm ${calcMode === 'gpu' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-white/50 shadow-none'}`}
             >
@@ -483,7 +478,7 @@ export default function CapacityPlanner({
               CPU
             </button>
           </div>
-          <p className="text-xs text-slate-500 pt-1">Choose CPU to force CPU-based sizing, GPU for GPU sizing, or Auto.</p>
+          <p className="text-xs text-slate-500 pt-1">Choose CPU to force CPU-based sizing or GPU for GPU sizing.</p>
         </div>
 
         <div className="space-y-2 mb-6">
@@ -621,17 +616,12 @@ export default function CapacityPlanner({
         </div>
 
         <div className="space-y-2 mb-6">
-          <label htmlFor="reverse_quantization" className="block text-sm font-semibold text-slate-700">Quantization Level</label>
-          <select
+          <QuantizationSelect
             id="reverse_quantization"
-            value={quantization}
-            onChange={(e) => setQuantization(e.target.value)}
-            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {QUANTIZATION_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.name}</option>
-            ))}
-          </select>
+            value={quantization as import('@/lib/types').QuantizationType}
+            onChange={(v) => setQuantization(v)}
+            label="Quantization Level"
+          />
           <p className="text-xs text-slate-500">{HELPER_TEXT.quantizationNote}</p>
         </div>
 
@@ -850,30 +840,54 @@ export default function CapacityPlanner({
           </div>
         )}
 
-        <div className="space-y-2 mb-6">
-          <label htmlFor="reverse_hardware" className="block text-sm font-semibold text-slate-700">Target Hardware</label>
-          <select
-            id="reverse_hardware"
-            value={hardware}
-            onChange={(e) => setHardware(e.target.value)}
-            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            {hardwareGroups.map((group: any) => (
-              <optgroup key={group.family} label={group.family}>
-                {group.options.map((hw: any, idx: number) => {
-                  const memDisplay = hw.type === 'cpu'
-                    ? `(Max: ${hw.memory >= 1000 ? (hw.memory / 1000).toFixed(1) + 'TB' : hw.memory + 'GB'} DDR5)`
-                    : `- ${hw.memory}GB VRAM`;
-                  return (
-                    <option key={idx} value={hw.value}>
-                      {hw.name} {memDisplay}
-                    </option>
-                  );
-                })}
-              </optgroup>
-            ))}
-          </select>
-          <p className="text-xs text-slate-500">All hardware options available ({hardwareGroups.reduce((acc: number, g: any) => acc + g.options.length, 0)} total)</p>
+        <div className="mb-6">
+          {calcMode === 'gpu' ? (
+            <div>
+              <label htmlFor="reverse_hardware_gpu" className="block text-sm font-semibold text-slate-700">GPU Options</label>
+              <select
+                id="reverse_hardware_gpu"
+                value={hardwareDatabase.find(h => h.value === hardware && h.type === 'gpu')?.value || ''}
+                onChange={(e) => setHardware(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">-- Select GPU --</option>
+                {hardwareGroups
+                  .map((group: any) => ({ family: group.family, options: group.options.filter((hw: any) => hw.type === 'gpu') }))
+                  .filter((g: any) => g.options.length > 0)
+                  .map((group: any) => (
+                    <optgroup key={group.family} label={group.family}>
+                      {group.options.map((hw: any, idx: number) => (
+                        <option key={idx} value={hw.value}>{hw.name} - {hw.memory}GB</option>
+                      ))}
+                    </optgroup>
+                  ))}
+              </select>
+              <p className="text-xs text-slate-500">GPU options compatible with selected quantization</p>
+            </div>
+          ) : (
+            <div>
+              <label htmlFor="reverse_hardware_cpu" className="block text-sm font-semibold text-slate-700">CPU Options</label>
+              <select
+                id="reverse_hardware_cpu"
+                value={hardwareDatabase.find(h => h.value === hardware && h.type === 'cpu')?.value || ''}
+                onChange={(e) => setHardware(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">-- Select CPU --</option>
+                {hardwareGroups
+                  .map((group: any) => ({ family: group.family, options: group.options.filter((hw: any) => hw.type === 'cpu') }))
+                  .filter((g: any) => g.options.length > 0)
+                  .map((group: any) => (
+                    <optgroup key={group.family} label={group.family}>
+                      {group.options.map((hw: any, idx: number) => (
+                        <option key={idx} value={hw.value}>{hw.name} - {hw.memory}GB</option>
+                      ))}
+                    </optgroup>
+                  ))}
+              </select>
+              <p className="text-xs text-slate-500">CPU options compatible with selected quantization</p>
+            </div>
+          )}
         </div>
 
         <div className="space-y-2 mb-6">

@@ -9,8 +9,8 @@ import PerformanceChart from '@/components/PerformanceChart';
 import AdvancedCalculator from '@/components/AdvancedCalculator';
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
 import { speedBoosts, qualityImpact, quantSpec } from '@/lib/constants';
-import { hardwareDatabase } from '@/lib/hardwareDatabase';
-import { QUANTIZATION_OPTIONS, getHardwareFamily, HARDWARE_FAMILIES } from '@/lib/config';
+import HardwareSelect from '@/components/HardwareSelect';
+import QuantizationSelect from '@/components/QuantizationSelect';
 
 export default function CombinedViewerPage() {
   const [hardware, setHardware] = useState<HardwareType>('h100-3958,int8'); // H100 INT8 as default
@@ -73,52 +73,21 @@ export default function CombinedViewerPage() {
           <h2 className="text-xl font-semibold text-blue-900 mb-5">Configuration Settings</h2>
           <div className={`grid gap-6 ${activeView === 'chart' ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-2'}`}>
             <div>
-              <label className="block font-semibold mb-2 text-slate-800 text-sm uppercase tracking-wide">
-                Hardware Configuration
-              </label>
-              <select 
-                value={hardware}
-                onChange={(e) => setHardware(e.target.value as HardwareType)}
-                className="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-sm bg-white cursor-pointer transition-all duration-300 hover:border-blue-500 focus:outline-none focus:border-blue-600 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] font-medium"
-              >
-                {(() => {
-                  // Group hardware by family
-                  const groups: { [key: string]: typeof hardwareDatabase } = {};
-                  hardwareDatabase.forEach(hw => {
-                    const family = getHardwareFamily(hw.name);
-                    if (!groups[family]) groups[family] = [];
-                    groups[family].push(hw);
-                  });
-                  
-                  return HARDWARE_FAMILIES.map(family => {
-                    if (!groups[family]) return null;
-                    return (
-                      <optgroup key={family} label={family}>
-                        {groups[family].map((hw, idx) => (
-                          <option key={idx} value={hw.value}>
-                            {hw.name} - {hw.memory}GB
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  });
-                })()}
-              </select>
+                <div>
+                <HardwareSelect
+                  id="hardware"
+                  value={hardware}
+                  onChange={(v) => setHardware(v as HardwareType)}
+                  quantization={quantization}
+                />
+              </div>
             </div>
             <div>
-              <label className="block font-semibold mb-2 text-slate-800 text-sm uppercase tracking-wide">
-                Quantization Level
-              </label>
-              <select 
+              <QuantizationSelect
+                id="quantization"
                 value={quantization}
-                onChange={(e) => setQuantization(e.target.value as QuantizationType)}
-                className="w-full px-4 py-3 border-2 border-slate-300 rounded-lg text-sm bg-white cursor-pointer transition-all duration-300 hover:border-blue-500 focus:outline-none focus:border-blue-600 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] font-medium"
-              >
-                <option value="fp16">FP16 (Full Precision - Highest Quality)</option>
-                <option value="int8">INT8 (Balanced - Good Quality)</option>
-                <option value="q4_k_s">Q4_K_S (Optimized - CPU Compatible)</option>
-                <option value="int4">INT4 (Optimized - Best Performance)</option>
-              </select>
+                onChange={(v) => setQuantization(v as QuantizationType)}
+              />
             </div>
             {activeView === 'chart' && (
               <div>

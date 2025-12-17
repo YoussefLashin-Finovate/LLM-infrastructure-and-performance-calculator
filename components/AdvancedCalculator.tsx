@@ -87,8 +87,8 @@ export default function AdvancedCalculator() {
     customActiveExperts,
   });
 
-  // Calculation mode (auto / cpu / gpu)
-  const [calcMode, setCalcMode] = useState<'auto' | 'cpu' | 'gpu'>('auto');
+  // Calculation mode (cpu / gpu)
+  const [calcMode, setCalcMode] = useState<'cpu' | 'gpu'>('gpu');
   const [cpuTps, setCpuTps] = useState<number>(8);
   const [cpuPrefillMultiplier, setCpuPrefillMultiplier] = useState<number>(2.5);
   const [cpuUtilizationTarget, setCpuUtilizationTarget] = useState<number>(0.65);
