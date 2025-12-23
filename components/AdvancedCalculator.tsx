@@ -45,7 +45,7 @@ export default function AdvancedCalculator() {
   const [reverseHardware, setReverseHardware] = useState(DEFAULT_VALUES.capacity.hardware);
   const [reverseUtil, setReverseUtil] = useState(DEFAULT_VALUES.capacity.utilization);
 
-  // KV Cache toggle and token breakdown for reverse
+  // KV Cache toggle and token breakdown for capacity planner
   const [reverseUseKVCache, setReverseUseKVCache] = useState(false);
   const [reverseKvOffloading, setReverseKvOffloading] = useState(false);
   const [reverseKvOffloadingPercentage, setReverseKvOffloadingPercentage] = useState(100);
@@ -53,10 +53,10 @@ export default function AdvancedCalculator() {
   const [reverseSessionHistoryTokens, setReverseSessionHistoryTokens] = useState(2000);
   const [reverseNewInputTokens, setReverseNewInputTokens] = useState(512);
 
-  // MoE Architecture Toggle for reverse
+  // MoE Architecture Toggle for capacity planner
   const [reverseUseMoeArchitecture, setReverseUseMoeArchitecture] = useState(false);
 
-  // Custom Model Configuration for reverse
+  // Custom Model Configuration for capacity planner
   const [reverseUseCustomModel, setReverseUseCustomModel] = useState(false);
   const [reverseCustomTotalParams, setReverseCustomTotalParams] = useState(70);
   const [reverseCustomActiveParams, setReverseCustomActiveParams] = useState(70);
@@ -66,7 +66,44 @@ export default function AdvancedCalculator() {
   // UI State
   const [activeTab, setActiveTab] = useState<'performance' | 'capacity'>('performance');
 
+  // Production-Grade Framework State
+  const [useProductionFramework, setUseProductionFramework] = useState(false);
+  const [numUsers, setNumUsers] = useState(100);
+  const [tokensPerSecPerUser, setTokensPerSecPerUser] = useState(10);
+  const [peakFlops, setPeakFlops] = useState(1e15); // H100 default
+  const [vramPerGpu, setVramPerGpu] = useState(96); // H100 default
+  const [kernelEfficiency, setKernelEfficiency] = useState(0.5);
+  const [utilizationFactor, setUtilizationFactor] = useState(0.8);
+  const [attentionOverhead, setAttentionOverhead] = useState(0.1);
+  const [prefillOverhead, setPrefillOverhead] = useState(0.1);
+  const [targetHeadroom, setTargetHeadroom] = useState(0.1);
+  const [systemPromptTokensPG, setSystemPromptTokensPG] = useState(0);
+  const [sessionHistoryTokensPG, setSessionHistoryTokensPG] = useState(0);
+  const [newInputTokensPerRequest, setNewInputTokensPerRequest] = useState(100);
+  const [avgResponseTokensPerRequest, setAvgResponseTokensPerRequest] = useState(50);
+  const [offloadRatio, setOffloadRatio] = useState(0);
+
+  // CPU/GPU mode and CPU-specific overrides
+  const [calcMode, setCalcMode] = useState<'cpu' | 'gpu'>('gpu');
+  const [cpuPrefillMultiplier, setCpuPrefillMultiplier] = useState(0.5);
+  const [cpuUtilizationTarget, setCpuUtilizationTarget] = useState(0.3);
+  const [cpuRedundancy, setCpuRedundancy] = useState(0.1);
+  const [cpuAMXEfficiency, setCpuAMXEfficiency] = useState(0.8);
+  const [cpuModelRamOverhead, setCpuModelRamOverhead] = useState(0.2);
+
+  // Active KV session fraction (percentage of users with resident KV cache)
+  const [activeKvSessionFraction, setActiveKvSessionFraction] = useState(0.05); // default 5%
+
   // Use custom hooks for calculations
+  const [performanceUnits, setPerformanceUnits] = useState(1);
+  const [avgResponseTokensPerRequestPerf, setAvgResponseTokensPerRequestPerf] = useState(50);
+  const [performanceIsCPU, setPerformanceIsCPU] = useState(calcMode === 'cpu');
+
+  // Keep perf device in sync with calcMode when global mode changes
+  useEffect(() => {
+    setPerformanceIsCPU(calcMode === 'cpu');
+  }, [calcMode]);
+
   const performanceResults = usePerformanceCalculation({
     model,
     hardware,
@@ -85,20 +122,37 @@ export default function AdvancedCalculator() {
     customActiveParams,
     customTotalExperts,
     customActiveExperts,
+    units: performanceUnits,
+    avgResponseTokensPerRequest: avgResponseTokensPerRequestPerf,
+    tokensPerSecPerUser,
+    // Device-specific
+    isCPU: performanceIsCPU,
+    kernelEfficiency,
+    cpuAMXEfficiency,
+    cpuUtilizationTarget
   });
-
-  // Calculation mode (cpu / gpu)
-  const [calcMode, setCalcMode] = useState<'cpu' | 'gpu'>('gpu');
-  const [cpuTps, setCpuTps] = useState<number>(8);
-  const [cpuPrefillMultiplier, setCpuPrefillMultiplier] = useState<number>(2.5);
-  const [cpuUtilizationTarget, setCpuUtilizationTarget] = useState<number>(0.65);
-  const [cpuRedundancy, setCpuRedundancy] = useState<number>(1.15);
-  const [cpuAMXEfficiency, setCpuAMXEfficiency] = useState<number>(0.2);
-  const [cpuModelRamOverhead, setCpuModelRamOverhead] = useState<number>(1.2);
 
 
 
   const capacityResults = useCapacityCalculation({
+    // Production-grade framework
+    useProductionFramework,
+    numUsers,
+    tokensPerSecPerUser,
+    peakFlops,
+    vramPerGpu,
+    kernelEfficiency,
+    utilizationFactor,
+    attentionOverhead,
+    prefillOverhead,
+    targetHeadroom,
+    systemPromptTokensPG,
+    sessionHistoryTokensPG,
+    newInputTokensPerRequest,
+    avgResponseTokensPerRequest,
+    offloadRatio,
+    
+    // Legacy fields
     model: reverseModel,
     hardware: reverseHardware,
     quantization: reverseQuantization,
@@ -112,19 +166,20 @@ export default function AdvancedCalculator() {
     systemPromptTokens: reverseSystemPromptTokens,
     sessionHistoryTokens: reverseSessionHistoryTokens,
     newInputTokens: reverseNewInputTokens,
-    useMoeArchitecture: reverseUseMoeArchitecture,
-    useCustomModel: reverseUseCustomModel,
-    customTotalParams: reverseCustomTotalParams,
-    customActiveParams: reverseCustomActiveParams,
-    customTotalExperts: reverseCustomTotalExperts,
-    customActiveExperts: reverseCustomActiveExperts,
+    useMoeArchitecture: useProductionFramework ? useMoeArchitecture : reverseUseMoeArchitecture,
+    useCustomModel: useProductionFramework ? useCustomModel : reverseUseCustomModel,
+    customTotalParams: useProductionFramework ? customTotalParams : reverseCustomTotalParams,
+    customActiveParams: useProductionFramework ? customActiveParams : reverseCustomActiveParams,
+    customTotalExperts: useProductionFramework ? customTotalExperts : reverseCustomTotalExperts,
+    customActiveExperts: useProductionFramework ? customActiveExperts : reverseCustomActiveExperts,
     // Forward CPU overrides
-    cpuTps,
     cpuPrefillMultiplier,
     cpuUtilizationTarget,
     cpuRedundancy,
     cpuAMXEfficiency,
     cpuModelRamOverhead,
+    // Active KV session fraction
+    activeKvFraction: activeKvSessionFraction
   });
 
   // Hardware filtering hooks
@@ -142,6 +197,65 @@ export default function AdvancedCalculator() {
       if (gpuOption) setReverseHardware(gpuOption.value);
     }
   }, [calcMode, reverseQuantization, availableReverseHardware]);
+
+  // Keep performance calculator in sync with capacity planner selection
+  useEffect(() => {
+    const selectedReverse = availableReverseHardware.find(hw => hw.value === reverseHardware);
+    if (!selectedReverse) return;
+
+    // When user selects a hardware in Capacity Planner, force global mode and mirror the hardware into Performance if possible
+    if (selectedReverse.type === 'cpu') {
+      setCalcMode('cpu');
+      const perfMatch = availableHardware.find(hw => hw.value === reverseHardware);
+      if (perfMatch) setHardware(perfMatch.value);
+      else {
+        const cpuPerfOption = availableHardware.find(hw => hw.type === 'cpu' && hw.quantTypes.includes(quantization));
+        if (cpuPerfOption) setHardware(cpuPerfOption.value);
+      }
+    } else {
+      setCalcMode('gpu');
+      const perfMatch = availableHardware.find(hw => hw.value === reverseHardware);
+      if (perfMatch) setHardware(perfMatch.value);
+      else {
+        const gpuPerfOption = availableHardware.find(hw => hw.type === 'gpu' && hw.quantTypes.includes(quantization));
+        if (gpuPerfOption) setHardware(gpuPerfOption.value);
+      }
+    }
+  }, [reverseHardware, availableReverseHardware, availableHardware, quantization, reverseQuantization, setCalcMode]);
+
+  // Ensure when calcMode changes, both Performance and Capacity hardware are compatible with the mode
+  useEffect(() => {
+    if (calcMode === 'cpu') {
+      // Performance HW
+      const perfHw = availableHardware.find(hw => hw.value === hardware);
+      if (!perfHw || perfHw.type !== 'cpu') {
+        const cpuOption = availableHardware.find(hw => hw.type === 'cpu' && hw.quantTypes.includes(quantization));
+        if (cpuOption) setHardware(cpuOption.value);
+      }
+      // Capacity HW
+      const revHw = availableReverseHardware.find(hw => hw.value === reverseHardware);
+      if (!revHw || revHw.type !== 'cpu') {
+        const cpuRev = availableReverseHardware.find(hw => hw.type === 'cpu' && hw.quantTypes.includes(reverseQuantization));
+        if (cpuRev) setReverseHardware(cpuRev.value);
+      }
+    } else {
+      const perfHw = availableHardware.find(hw => hw.value === hardware);
+      if (!perfHw || perfHw.type !== 'gpu') {
+        const gpuOption = availableHardware.find(hw => hw.type === 'gpu' && hw.quantTypes.includes(quantization));
+        if (gpuOption) setHardware(gpuOption.value);
+      }
+      const revHw = availableReverseHardware.find(hw => hw.value === reverseHardware);
+      if (!revHw || revHw.type !== 'gpu') {
+        const gpuRev = availableReverseHardware.find(hw => hw.type === 'gpu' && hw.quantTypes.includes(reverseQuantization));
+        if (gpuRev) setReverseHardware(gpuRev.value);
+      }
+    }
+  }, [calcMode, availableHardware, availableReverseHardware, quantization, reverseQuantization, hardware, reverseHardware]);
+
+  // Set production framework based on calcMode
+  useEffect(() => {
+    setUseProductionFramework(calcMode === 'gpu');
+  }, [calcMode, setUseProductionFramework]);
 
 
   // Auto-select compatible hardware when quantization changes
@@ -235,6 +349,42 @@ export default function AdvancedCalculator() {
           setCustomTotalExperts={setCustomTotalExperts}
           customActiveExperts={customActiveExperts}
           setCustomActiveExperts={setCustomActiveExperts}
+          units={performanceUnits}
+          setUnits={setPerformanceUnits}
+          tokensPerSecPerUser={tokensPerSecPerUser}
+          setTokensPerSecPerUser={setTokensPerSecPerUser}
+          avgResponseTokensPerRequest={avgResponseTokensPerRequestPerf}
+          setAvgResponseTokensPerRequest={setAvgResponseTokensPerRequestPerf}
+          calcMode={calcMode}
+          setCalcMode={setCalcMode}
+          kernelEfficiency={kernelEfficiency}
+          setKernelEfficiency={setKernelEfficiency}
+          cpuAMXEfficiency={cpuAMXEfficiency}
+          setCpuAMXEfficiency={setCpuAMXEfficiency}
+          cpuUtilizationTarget={cpuUtilizationTarget}
+          setCpuUtilizationTarget={setCpuUtilizationTarget}
+          // Capacity parity props
+          targetHeadroom={targetHeadroom}
+          setTargetHeadroom={setTargetHeadroom}
+          offloadRatio={offloadRatio}
+          setOffloadRatio={setOffloadRatio}
+          activeKvFraction={activeKvSessionFraction}
+          setActiveKvFraction={setActiveKvSessionFraction}
+          // Production & CPU parity
+          useProductionFramework={useProductionFramework}
+          setUseProductionFramework={setUseProductionFramework}
+          utilizationFactor={utilizationFactor}
+          setUtilizationFactor={setUtilizationFactor}
+          attentionOverheadInput={attentionOverhead}
+          setAttentionOverhead={setAttentionOverhead}
+          prefillOverheadInput={prefillOverhead}
+          setPrefillOverhead={setPrefillOverhead}
+          cpuPrefillMultiplier={cpuPrefillMultiplier}
+          setCpuPrefillMultiplier={setCpuPrefillMultiplier}
+          cpuRedundancy={cpuRedundancy}
+          setCpuRedundancy={setCpuRedundancy}
+          cpuModelRamOverhead={cpuModelRamOverhead}
+          setCpuModelRamOverhead={setCpuModelRamOverhead}
           results={performanceResults}
         />
       )}
@@ -242,6 +392,39 @@ export default function AdvancedCalculator() {
       {/* Capacity Planning Tab */}
       {activeTab === 'capacity' && (
         <CapacityPlanner
+          // Production-Grade Framework
+          useProductionFramework={useProductionFramework}
+          setUseProductionFramework={setUseProductionFramework}
+          numUsers={numUsers}
+          setNumUsers={setNumUsers}
+          tokensPerSecPerUser={tokensPerSecPerUser}
+          setTokensPerSecPerUser={setTokensPerSecPerUser}
+          peakFlops={peakFlops}
+          setPeakFlops={setPeakFlops}
+          vramPerGpu={vramPerGpu}
+          setVramPerGpu={setVramPerGpu}
+          kernelEfficiency={kernelEfficiency}
+          setKernelEfficiency={setKernelEfficiency}
+          utilizationFactor={utilizationFactor}
+          setUtilizationFactor={setUtilizationFactor}
+          attentionOverhead={attentionOverhead}
+          setAttentionOverhead={setAttentionOverhead}
+          prefillOverhead={prefillOverhead}
+          setPrefillOverhead={setPrefillOverhead}
+          targetHeadroom={targetHeadroom}
+          setTargetHeadroom={setTargetHeadroom}
+          systemPromptTokensPG={systemPromptTokensPG}
+          setSystemPromptTokensPG={setSystemPromptTokensPG}
+          sessionHistoryTokensPG={sessionHistoryTokensPG}
+          setSessionHistoryTokensPG={setSessionHistoryTokensPG}
+          newInputTokensPerRequest={newInputTokensPerRequest}
+          setNewInputTokensPerRequest={setNewInputTokensPerRequest}
+          avgResponseTokensPerRequest={avgResponseTokensPerRequest}
+          setAvgResponseTokensPerRequest={setAvgResponseTokensPerRequest}
+          offloadRatio={offloadRatio}
+          setOffloadRatio={setOffloadRatio}
+          
+          // Legacy fields
           model={reverseModel}
           setModel={setReverseModel}
           quantization={reverseQuantization}
@@ -268,23 +451,22 @@ export default function AdvancedCalculator() {
           setSessionHistoryTokens={setReverseSessionHistoryTokens}
           newInputTokens={reverseNewInputTokens}
           setNewInputTokens={setReverseNewInputTokens}
-          useMoeArchitecture={reverseUseMoeArchitecture}
-          setUseMoeArchitecture={setReverseUseMoeArchitecture}
-          useCustomModelReverse={reverseUseCustomModel}
-          setUseCustomModelReverse={setReverseUseCustomModel}
-          customTotalParamsReverse={reverseCustomTotalParams}
-          setCustomTotalParamsReverse={setReverseCustomTotalParams}
-          customActiveParamsReverse={reverseCustomActiveParams}
-          setCustomActiveParamsReverse={setReverseCustomActiveParams}
-          customTotalExpertsReverse={reverseCustomTotalExperts}
-          setCustomTotalExpertsReverse={setReverseCustomTotalExperts}
-          customActiveExpertsReverse={reverseCustomActiveExperts}
-          setCustomActiveExpertsReverse={setReverseCustomActiveExperts}
+          useMoeArchitecture={useMoeArchitecture}
+          setUseMoeArchitecture={setUseMoeArchitecture}
+          useCustomModelReverse={useCustomModel}
+          setUseCustomModelReverse={setUseCustomModel}
+          customTotalParamsReverse={customTotalParams}
+          setCustomTotalParamsReverse={setCustomTotalParams}
+          customActiveParamsReverse={customActiveParams}
+          setCustomActiveParamsReverse={setCustomActiveParams}
+          customTotalExpertsReverse={customTotalExperts}
+          setCustomTotalExpertsReverse={setCustomTotalExperts}
+          customActiveExpertsReverse={customActiveExperts}
+          setCustomActiveExpertsReverse={setCustomActiveExperts}
           // CPU / GPU mode & CPU config
           calcMode={calcMode}
           setCalcMode={setCalcMode}
-          cpuTps={cpuTps}
-          setCpuTps={setCpuTps}
+
           cpuPrefillMultiplier={cpuPrefillMultiplier}
           setCpuPrefillMultiplier={setCpuPrefillMultiplier}
           cpuUtilizationTarget={cpuUtilizationTarget}
@@ -295,6 +477,9 @@ export default function AdvancedCalculator() {
           setCpuAMXEfficiency={setCpuAMXEfficiency}
           cpuModelRamOverhead={cpuModelRamOverhead}
           setCpuModelRamOverhead={setCpuModelRamOverhead}
+          // Active KV session fraction
+          activeKvFraction={activeKvSessionFraction}
+          setActiveKvFraction={setActiveKvSessionFraction}
           results={capacityResults}
         />
       )}

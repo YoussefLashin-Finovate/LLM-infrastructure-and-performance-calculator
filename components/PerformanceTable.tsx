@@ -2,6 +2,11 @@
 
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { calculatePerformance } from '@/lib/calculations';
+import { calculateModelSize } from '@/lib/calculationParameters';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { normalizeQuantType } from '@/lib/equations/quant';
+import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 interface PerformanceTableProps {
   quantization: QuantizationType;
@@ -10,85 +15,56 @@ interface PerformanceTableProps {
 }
 
 export default function PerformanceTable({ quantization, hardware, metric }: PerformanceTableProps) {
-  const modelCategories = [
-    {
-      models: ["Phi-3", "Gemma 2"],
-      arabicModels: [],
-      params: "3.8B-9B",
-      ttft: 38,
-      latency: 57,
-      users: 25,
-      batchSize: 180,
-      vram: 18,
-      context: 4096
-    },
-    {
-      models: ["Mistral 7B", "Llama 3.1 8B", "Qwen 2.5 7B", "Gemma 2 9B", "DeepSeek 7B"],
-      arabicModels: [],
-      params: "7B-9B",
-      ttft: 80,
-      latency: 120,
-      users: 12,
-      batchSize: 156,
-      vram: 16,
-      context: 4096
-    },
-    {
-      models: ["Jais 13B", "Llama 2 13B", "Llama 3.1 13B", "DeepSeek 14B"],
-      arabicModels: ["Jais 13B"],
-      params: "13B-14B",
-      ttft: 140,
-      latency: 210,
-      users: 7,
-      batchSize: 92,
-      vram: 28,
-      context: 4096
-    },
-    {
-      models: ["Gemma 2 27B", "Qwen 2.5 32B"],
-      arabicModels: [],
-      params: "27B-32B",
-      ttft: 300,
-      latency: 450,
-      users: 3,
-      batchSize: 39,
-      vram: 64,
-      context: 8192
-    },
-    {
-      models: ["CodeLlama 34B"],
-      arabicModels: [],
-      params: "34B",
-      ttft: 340,
-      latency: 510,
-      users: 3,
-      batchSize: 29,
-      vram: 68,
-      context: 8192
-    },
-    {
-      models: ["Mixtral 8x7B"],
-      arabicModels: [],
-      params: "46.7B MoE",
-      ttft: 467,
-      latency: 700,
-      users: 2,
-      batchSize: 18,
-      vram: 93,
-      context: 16384
-    },
-    {
-      models: ["Llama 3.1 70B", "Qwen 2.5 72B"],
-      arabicModels: [],
-      params: "70B-72B",
-      ttft: 700,
-      latency: 1050,
-      users: 1,
-      batchSize: 9,
-      vram: 140,
-      context: 16384
-    }
+  // Model categories with representative parameter sizes for calculations
+  const modelDefinitions = [
+    { models: ["Phi-3", "Gemma 2"], arabicModels: [], paramsLabel: "3.8B-9B", representativeParams: 3.8 },
+    { models: ["Mistral 7B", "Llama 3.1 8B", "Qwen 2.5 7B", "Gemma 2 9B", "DeepSeek 7B"], arabicModels: [], paramsLabel: "7B-9B", representativeParams: 7 },
+    { models: ["Jais 13B", "Llama 2 13B", "Llama 3.1 13B", "DeepSeek 14B"], arabicModels: ["Jais 13B"], paramsLabel: "13B-14B", representativeParams: 13 },
+    { models: ["Gemma 2 27B", "Qwen 2.5 32B"], arabicModels: [], paramsLabel: "27B-32B", representativeParams: 27 },
+    { models: ["CodeLlama 34B"], arabicModels: [], paramsLabel: "34B", representativeParams: 34 },
+    { models: ["Mixtral 8x7B"], arabicModels: [], paramsLabel: "46.7B MoE", representativeParams: 46.7 },
+    { models: ["Llama 3.1 70B", "Qwen 2.5 72B"], arabicModels: [], paramsLabel: "70B-72B", representativeParams: 70 }
   ];
+
+  // Compute live metrics using calculatePerformance and calculation helpers
+  const rows = (() => {
+    // Resolve hardware
+    const hwConfig = hardwareDatabase.find(hw => hw.value === hardware);
+    const hardwareOps = parseHardwareOpsFromValue(hwConfig?.value || '0');
+
+    return modelDefinitions.map(def => {
+      const inputs = {
+        modelParams: def.representativeParams,
+        hardwareOps,
+        utilization: 0.35,
+        inputLength: 100,
+        responseLength: 200,
+        thinkTime: 5,
+        quantType: normalizeQuantType(quantization as string)
+      } as any;
+
+      const result = calculatePerformance(inputs);
+
+      // Compute values to display
+      const ttft = Math.round((inputs.inputLength / (result.realistic || 1)) * 1000);
+      const latency = Math.round(((inputs.inputLength + inputs.responseLength) / (result.realistic || 1)) * 1000);
+      const users = Math.max(1, Math.round(result.users));
+      const modelSizeGB = Math.round(calculateModelSize(def.representativeParams, quantization));
+      const availableMemory = (hwConfig?.memory || 96) - modelSizeGB;
+      const batchSize = Math.max(1, Math.floor(availableMemory / Math.max(1, Math.round(modelSizeGB * 0.1))));
+      const contextWindow = def.representativeParams < 20 ? 4096 : def.representativeParams < 50 ? 8192 : 16384;
+
+      return {
+        ...def,
+        ttft,
+        latency,
+        users,
+        batchSize,
+        vram: modelSizeGB,
+        context: contextWindow
+      };
+    });
+  })();
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm mb-8">
@@ -131,7 +107,7 @@ export default function PerformanceTable({ quantization, hardware, metric }: Per
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {modelCategories.map((cat, idx) => (
+            {rows.map((row, idx) => (
               <tr
                 key={idx}
                 className={cn(
@@ -141,12 +117,12 @@ export default function PerformanceTable({ quantization, hardware, metric }: Per
               >
                 <td className="p-4 align-top">
                   <div className="flex flex-wrap gap-2">
-                    {cat.models.map(model => (
+                    {row.models.map(model => (
                       <span
                         key={model}
                         className={cn(
                           "inline-flex items-center px-2 py-1 rounded text-xs font-medium border",
-                          cat.arabicModels.includes(model)
+                          row.arabicModels?.includes(model)
                             ? "bg-amber-50 text-amber-700 border-amber-200"
                             : "bg-slate-100/50 text-slate-600 border-slate-200"
                         )}
@@ -157,25 +133,25 @@ export default function PerformanceTable({ quantization, hardware, metric }: Per
                   </div>
                 </td>
                 <td className="p-4 text-center font-medium text-slate-700 align-middle">
-                  {cat.params}
+                  {row.paramsLabel}
                 </td>
                 <td className="p-4 text-center text-slate-600 align-middle">
-                  {cat.ttft}
+                  {row.ttft}
                 </td>
                 <td className="p-4 text-center text-slate-600 align-middle">
-                  {cat.latency}
+                  {row.latency}
                 </td>
                 <td className="p-4 text-center text-slate-600 align-middle">
-                  {cat.users}
+                  {row.users}
                 </td>
                 <td className="p-4 text-center font-semibold text-slate-900 align-middle">
-                  {cat.batchSize}
+                  {row.batchSize}
                 </td>
                 <td className="p-4 text-center text-slate-600 align-middle">
-                  {cat.vram}
+                  {row.vram}
                 </td>
                 <td className="p-4 text-center text-slate-600 align-middle">
-                  {cat.context.toLocaleString()}
+                  {row.context.toLocaleString()}
                 </td>
               </tr>
             ))}

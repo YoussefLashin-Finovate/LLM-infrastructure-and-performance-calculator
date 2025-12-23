@@ -84,6 +84,28 @@ export interface CalculatorInputs {
   tokenBreakdown?: TokenBreakdown;
   coldStartRate?: number;
   gpuMemoryGB?: number;
+  // Optional performance inputs
+  units?: number; // number of hardware units (GPUs/CPUs) available
+  kernelEfficiency?: number; // kernel efficiency factor (0..1) - used for GPU calculations
+  avgResponseTokensPerRequest?: number; // used to estimate requests/sec for prefill (defaults to responseLength if not provided)
+  tokensPerSecPerUser?: number; // input tokens per second per user for performance calculations
+  // CPU-specific inputs
+  isCPU?: boolean;
+  cpuAMXEfficiency?: number; // sustained efficiency for CPU (0..1)
+  cpuUtilizationTarget?: number; // utilization target for CPU workloads
+  // Capacity/performance controls
+  redundancyFactor?: number; // e.g., 0.15 for 15% redundancy
+  targetHeadroom?: number; // e.g., 0.10 for 10% headroom
+  offloadRatio?: number; // fraction of KV cache offloaded to CPU/NVMe (0..1)
+  activeKvFraction?: number; // fraction of users with active KV resident (0..1)
+  // Production / GPU and CPU controls
+  useProductionFramework?: boolean;
+  utilizationFactor?: number;
+  attentionOverhead?: number;
+  prefillOverhead?: number;
+  cpuPrefillMultiplier?: number;
+  cpuRedundancy?: number;
+  cpuModelRamOverhead?: number;
   // MoE-specific fields
   useMoeArchitecture?: boolean;
   expertShards?: number;
@@ -110,37 +132,81 @@ export interface CalculatorResults {
   vramAllocation?: VRAMAllocation;
   prefillThroughput?: number;
   decodeThroughput?: number;
+  // Expose capacity control values when present (for UI/debug)
+  redundancyFactor?: number;
+  targetHeadroom?: number;
+  offloadRatio?: number;
+  activeKvFraction?: number;
+  // New mathematical framework outputs
+  usableFlops?: number;
+  maxThroughput?: number;
+  maxUsers?: number;
+  throughputPerGpu?: number;
+  usersPerGpu?: number;
+  totalOverheadMultiplier?: number;
+  effectiveFlopsPerGpu?: number;
+  flopsPerToken?: number;
+  // New serving efficiency factors
+  batchEfficiency?: number;
+  prefillEfficiency?: number;
+  decodeFlopsPerToken?: number;
+  tokenGenerationTime?: number;
+  rawMaxUsers?: number;
 }
 
 export interface CPUSizingResult {
   modelRamGB: number;
+  kvTotalGB?: number;           // Total KV cache required for workload (GB)
+  totalMemoryGB?: number;       // model + KV total memory required (GB)
+  memoryPerCPU?: number;        // memory required per CPU (GB)
   fitsOnSingleNode?: boolean;
   flopsPerTokenGFLOPS: number;
   totalFlopsTFLOPS: number;
   usableFlopsPerCPU?: number; // in FLOPs/s (same unit as hardwareOpsPerUnit)
+  targetTPSPerCPU?: number;
   cpusCompute: number;
-  TPS_CPU: number;
   cpusDecode: number;
   M_prefill: number;
   cpusWithPrefill: number;
   U_target: number;
-  cpusUtil: number;
+  
   redundancy: number;
   finalCPUs: number;
   finalCPUsRounded: number;
   deliveredTPS: number;
   sanityPass: boolean;
   notes?: string[];
+  // Active KV resident size (GB) after applying activeKvFraction
+  kvActiveGB?: number;
 }
 
 export interface ReverseCalculatorInputs {
-  modelParams: number;
-  users: number;
-  inputLength: number;
-  tokensPerUser: number;
-  hardwareOpsPerUnit: number;
-  utilization: number;
-  quantType: 'fp16' | 'int8' | 'int4';
+  // Production-Grade Framework Inputs
+  numUsers?: number;                    // Number of concurrent users
+  tokensPerSecPerUser?: number;         // Tokens per second per user
+  modelParams: number;                  // Model parameters in billions
+  bytesPerParam?: number;               // Bytes per parameter (depends on quantization)
+  quantizationLevel?: 'fp16' | 'int8' | 'int4'; // Quantization level
+  systemPromptTokens?: number;          // System prompt tokens per session
+  sessionHistoryTokens?: number;        // Session history tokens
+  newInputTokensPerRequest?: number;    // New input tokens per request
+  avgResponseTokensPerRequest?: number; // Average *response/output* tokens per request (used to estimate requests/sec)
+  offloadRatio?: number;                // KV cache offload ratio (0-1)
+  peakFlops?: number;                   // Peak FLOPs per GPU
+  vramPerGpu?: number;                  // VRAM per GPU in GB
+  kernelEfficiency?: number;            // Kernel efficiency factor
+  utilizationFactor?: number;           // Utilization factor
+  attentionOverhead?: number;           // Attention overhead factor
+  prefillOverhead?: number;             // Prefill overhead factor
+  targetHeadroom?: number;              // Target headroom (e.g., 0.1 for 10%)
+  
+  // Legacy fields (for backward compatibility) - will be deprecated
+  users?: number;
+  inputLength?: number;
+  tokensPerUser?: number;
+  hardwareOpsPerUnit?: number;
+  utilization?: number;
+  quantType?: 'fp16' | 'int8' | 'int4';
   // Optional token-aware fields
   tokenBreakdown?: TokenBreakdown;
   coldStartRate?: number;
@@ -148,7 +214,6 @@ export interface ReverseCalculatorInputs {
   // Optional CPU memory hint (GB) to validate model placement on single server
   cpuMemoryGB?: number;
   // Optional CPU-specific config overrides
-  cpuTps?: number; // TPS per CPU (decode throughput)
   cpuPrefillMultiplier?: number; // M_prefill
   cpuUtilizationTarget?: number; // U_target
   cpuRedundancy?: number; // redundancy factor
@@ -156,6 +221,8 @@ export interface ReverseCalculatorInputs {
   cpuModelRamOverhead?: number; // model RAM overhead multiplier
   kvOffloading?: boolean;
   kvOffloadingPercentage?: number; // 0-100: percentage of KV cache to offload to CPU/NVMe
+  // Active KV session fraction (0..1). Represents the fraction of users that have their session KV resident at any given time.
+  activeKvFraction?: number; // e.g., 0.05 for 5% active sessions
   // MoE-specific fields
   useMoeArchitecture?: boolean;
   expertShards?: number;
@@ -170,6 +237,23 @@ export interface ReverseCalculatorInputs {
 }
 
 export interface ReverseCalculatorResults {
+  // Production-Grade Framework Results
+  decodeTokensPerSec?: number;          // Decode tokens per second
+  decodeFlopsPerSec?: number;           // Decode FLOPs per second
+  prefillFlopsPerRequest?: number;      // Prefill FLOPs per request
+  prefillFlopsPerSec?: number;          // Prefill FLOPs per second
+  requiredFlops?: number;               // Total required FLOPs
+  effectiveFlopsPerGpu?: number;        // Effective FLOPs per GPU
+  maxUsers?: number;                    // Maximum users this configuration can support
+  kvVramPerGpu?: number;                // KV cache VRAM per GPU
+  requiredVramPerGpu?: number;          // Required VRAM per GPU
+  totalKvCacheGB?: number;              // Total worst-case KV cache (GB)
+  effectiveKvCacheGB?: number;          // Effective (active) KV cache resident in-memory (GB)
+  gpuCountMemory?: number;              // Memory-limited GPU count
+  gpuCountCompute?: number;             // Compute-limited GPU count
+  gpuCount?: number;                    // Final GPU count
+  
+  // Legacy fields (for backward compatibility)
   unitsNeeded: number;
   throughputPerUnit: number;
   totalSystemThroughput: number;
@@ -183,4 +267,14 @@ export interface ReverseCalculatorResults {
   kvCache?: KVCacheState;
   vramAllocation?: VRAMAllocation;
   batchingStrategy?: BatchingStrategy;
+  // FLOPs summary
+  requiredFLOPS?: number; // FLOPs/s required for workload (including model overheads)
+  availableFLOPS?: number; // FLOPs/s available from selected units (unitsNeeded * hardwareOpsPerUnit)
+  // Overhead breakdown separated into model overhead (affects required FLOPs) and capacity overhead (affects hardware counts)
+  modelOverheadPercent?: number;
+  capacityOverheadPercent?: number;
+    // Optional workload breakdown (PFLOPS)
+    decodeFlopsPFLOPS?: number;
+    prefillFlopsPFLOPS?: number;
+    totalWorkloadPFLOPS?: number;
 }

@@ -1,5 +1,8 @@
 import { useMemo } from 'react';
 import { calculatePerformance } from '@/lib/calculations';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { hardwareDatabase } from '@/lib/hardwareDatabase';
+import { CalculatorResults } from '@/lib/types';
 
 interface UsePerformanceCalculationProps {
   model: string;
@@ -19,6 +22,28 @@ interface UsePerformanceCalculationProps {
   customActiveParams?: number;
   customTotalExperts?: number;
   customActiveExperts?: number;
+  units?: number;
+  avgResponseTokensPerRequest?: number;
+  tokensPerSecPerUser?: number;
+  // Device / efficiency controls
+  isCPU?: boolean;
+  kernelEfficiency?: number;
+  cpuAMXEfficiency?: number;
+  cpuUtilizationTarget?: number;
+  // Capacity/performance controls
+  redundancyFactor?: number;
+  targetHeadroom?: number;
+  offloadRatio?: number;
+  activeKvFraction?: number;
+  // Production-grade flags & GPU controls
+  useProductionFramework?: boolean;
+  utilizationFactor?: number;
+  attentionOverhead?: number;
+  prefillOverhead?: number;
+  // CPU-specific production toggles
+  cpuPrefillMultiplier?: number;
+  cpuRedundancy?: number;
+  cpuModelRamOverhead?: number;
 }
 
 export function usePerformanceCalculation({
@@ -39,28 +64,30 @@ export function usePerformanceCalculation({
   customActiveParams = 1,
   customTotalExperts = 8,
   customActiveExperts = 2,
-}: UsePerformanceCalculationProps) {
+  units = 1,
+  avgResponseTokensPerRequest = undefined,
+  tokensPerSecPerUser = undefined,
+  isCPU = false,
+  kernelEfficiency = 0.5,
+  cpuAMXEfficiency = 0.5,
+  cpuUtilizationTarget = 1,
+  // Capacity defaults
+  redundancyFactor = 0.15,
+  targetHeadroom = 0.1,
+  offloadRatio = 0,
+  activeKvFraction = 0.05,
+  // Production defaults
+  useProductionFramework = false,
+  utilizationFactor = 0.8,
+  attentionOverhead = 0.1,
+  prefillOverhead = 0.1,
+  // CPU production defaults
+  cpuPrefillMultiplier = 0.5,
+  cpuRedundancy = 0.1,
+  cpuModelRamOverhead = 0.2,
+}: UsePerformanceCalculationProps): CalculatorResults {
   return useMemo(() => {
-    // Parse hardware ops (supports suffixes K/M/G/T/P). If no suffix given we assume T (tera) units
-    const opsRaw = (hardware.split(',')[0].split('-').pop() || '0').toString().trim();
-    // Match number with optional suffix (K, M, G, T, P) - case-insensitive
-    const match = opsRaw.toUpperCase().match(/^([0-9]*\.?[0-9]+)\s*([KMGTP])?$/);
-    let hardwareOps = 0;
-    if (match) {
-      const val = parseFloat(match[1]);
-      const suffix = match[2] || 'T'; // default to T (tera) when unspecified
-      const scaleMap: { [key: string]: number } = {
-        K: 1e3,
-        M: 1e6,
-        G: 1e9,
-        T: 1e12,
-        P: 1e15,
-      };
-      hardwareOps = val * (scaleMap[suffix] || 1e12);
-    } else {
-      // Fallback: treat as tera (T)
-      hardwareOps = parseFloat(opsRaw) * 1e12;
-    }
+    const hardwareOps = parseHardwareOpsFromValue(hardware);
 
     // Quantization type (if encoded in hardware value) — e.g. 'h100-3958,int8'
     const quantTypeRaw = (hardware.split(',')[1] || '') as string;
@@ -77,10 +104,14 @@ export function usePerformanceCalculation({
     } : undefined;
     
     // Use custom model params if custom model is enabled or if model='custom'
-    const effectiveModelParams = (useCustomModel || model === 'custom') ? customTotalParams : parseFloat(model);
+    const effectiveModelParams = (useCustomModel || model === 'custom') ? customTotalParams * 1e9 : parseFloat(model) * 1e9; // Convert billions to raw parameter count
     const effectiveUseCustomModel = useCustomModel || model === 'custom';
     
-    return calculatePerformance({
+    // Get GPU memory from hardware database for VRAM calculations
+    const selectedHardware = hardwareDatabase.find(hw => hw.value === hardware);
+    const gpuMemoryGB = selectedHardware?.memory || 96; // Default to 96GB if not found
+    
+    const results: CalculatorResults = calculatePerformance({
       modelParams: effectiveModelParams,
       hardwareOps,
       utilization,
@@ -89,12 +120,47 @@ export function usePerformanceCalculation({
       thinkTime,
       quantType,
       tokenBreakdown,
+      gpuMemoryGB,
       useMoeArchitecture,
       useCustomModel: effectiveUseCustomModel,
       customTotalParams,
       customActiveParams,
       customTotalExperts,
       customActiveExperts,
+      units,
+      avgResponseTokensPerRequest,
+      tokensPerSecPerUser,
+      isCPU,
+      kernelEfficiency,
+      cpuAMXEfficiency,
+      cpuUtilizationTarget,
+      // Capacity controls
+      redundancyFactor,
+      targetHeadroom,
+      offloadRatio,
+      activeKvFraction,
+      // Production / GPU controls
+      useProductionFramework,
+      utilizationFactor,
+      attentionOverhead,
+      prefillOverhead,
+      // CPU production overrides
+      cpuPrefillMultiplier,
+      cpuRedundancy,
+      cpuModelRamOverhead
     });
-  }, [model, hardware, utilization, inputLength, responseLength, thinkTime, useKVCache, systemPromptTokens, sessionHistoryTokens, newInputTokens, kvOffloading, useMoeArchitecture, useCustomModel, customTotalParams, customActiveParams, customTotalExperts, customActiveExperts]);
+
+    // Calculate FLOP metrics for centralized access (removed - not needed for PerformanceCalculator)
+    // const flopsPerToken = calculateDecodeFlopsPerToken(effectiveModelParams, undefined, undefined, useCustomModel ? 'custom' : undefined);
+    // const requiredSystemFlops = flopsPerToken * results.realistic; // Required FLOPs for realistic throughput
+    // const availableSystemFlops = hardwareOps * kernelEfficiency * utilization; // Available FLOPs based on hardware, kernel efficiency, and utilization
+
+    return {
+      ...results,
+      // flopsPerToken,
+      // requiredSystemFlops,
+      // availableSystemFlops,
+      // hardwareFlops: hardwareOps,
+    } as CalculatorResults;
+  }, [model, hardware, utilization, inputLength, responseLength, thinkTime, useKVCache, systemPromptTokens, sessionHistoryTokens, newInputTokens, kvOffloading, useMoeArchitecture, useCustomModel, customTotalParams, customActiveParams, customTotalExperts, customActiveExperts, units, avgResponseTokensPerRequest, tokensPerSecPerUser, redundancyFactor, targetHeadroom, offloadRatio, activeKvFraction, useProductionFramework, utilizationFactor, attentionOverhead, prefillOverhead, cpuPrefillMultiplier, cpuRedundancy, cpuModelRamOverhead]);
 }

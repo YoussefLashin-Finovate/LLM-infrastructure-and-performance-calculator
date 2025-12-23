@@ -45,13 +45,15 @@ export function computeHardwareNeeds(args: ComputeNeedsArgs): ComputeNeedsResult
     : decodeFlopsPerToken;
 
   const flopsPerToken = flopsPerTokenBase * Q;
-  const totalOverheadAdditive = prefillOverhead + attentionOverhead + (redundancyFactor - 1);
+  // Only include model/algorithm additive overheads here; capacity-related multipliers (redundancy, headroom, utilization)
+  // are applied when sizing hardware, not when computing the intrinsic required FLOPs.
+  const totalOverheadAdditive = prefillOverhead + attentionOverhead;
 
   const hardwareOpsNeeded = Eq.calculateRequiredFLOPS(
     totalTokensPerSec,
     flopsPerToken,
     totalOverheadAdditive,
-    utilization
+    utilization // kept for compatibility but not used in required FLOPs
   );
 
   const overheadMultiplier = 1 + totalOverheadAdditive;

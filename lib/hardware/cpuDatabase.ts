@@ -1,25 +1,30 @@
 import { HardwareOption } from '../hardwareDatabase';
 
 export const cpuDatabase: HardwareOption[] = [
-  { value: '2.0,int8', name: 'Xeon 8592+ (64C) AMX INT8 (2 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.8,int8', name: 'Xeon 8580 (60C) AMX INT8 (1.8 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.6,int8', name: 'Xeon 8568Y+ (48C) AMX INT8 (1.6 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.4,int8', name: 'Xeon 8558 (48C) AMX INT8 (1.4 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '3.5,int8', name: 'Xeon 6980P (128C P-Core) AMX INT8 (3.5 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '3.2,int8', name: 'Xeon 6972P (120C P-Core) AMX INT8 (3.2 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '2.8,int8', name: 'Xeon 6960P (96C P-Core) AMX INT8 (2.8 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '2.5,int8', name: 'Xeon 6952P (80C P-Core) AMX INT8 (2.5 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '2.2,int8', name: 'Xeon 6940P (64C P-Core) AMX INT8 (2.2 TOPS) 🆕', memory: 4096, quantTypes: ['int8'], type: 'cpu' },
-  { value: '4.0,int8', name: 'Xeon 6980E (288C E-Core) AMX INT8 (4.0 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '3.8,int8', name: 'Xeon 6972E (256C E-Core) AMX INT8 (3.8 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '3.5,int8', name: 'Xeon 6960E (224C E-Core) AMX INT8 (3.5 TOPS) 🆕', memory: 6144, quantTypes: ['int8'], type: 'cpu' },
-  { value: '3.2,int8', name: 'Xeon 6952E (192C E-Core) AMX INT8 (3.2 TOPS) 🆕', memory: 4096, quantTypes: ['int8'], type: 'cpu' },
-  { value: '2.8,int8', name: 'Xeon 6940E (144C E-Core) AMX INT8 (2.8 TOPS) 🆕', memory: 4096, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.5,int8', name: 'Xeon 8490H (60C) AMX INT8 (1.5 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.3,int8', name: 'Xeon 8480+ (56C) AMX INT8 (1.3 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.2,int8', name: 'Xeon 8470 (52C) AMX INT8 (1.2 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '1.0,int8', name: 'Xeon 8460Y+ (40C) AMX INT8 (1.0 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '0.8,int8', name: 'Xeon 8380 (40C) VNNI INT8 (0.8 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '0.7,int8', name: 'Xeon 8368 (38C) VNNI INT8 (0.7 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
-  { value: '0.6,int8', name: 'Xeon 8352Y (32C) VNNI INT8 (0.6 TOPS)', memory: 2048, quantTypes: ['int8'], type: 'cpu' }
+
+  // ===== Xeon 6 – P-Core (Highest compute CPUs) =====
+  { value: '6.144,compute', name: 'Xeon 6980P (Xeon 6, 128C P-Core) – 6.144 TFLOPS Peak', memory: 6144, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '6.144,compute', name: 'Xeon 6979P (Xeon 6, 128C P-Core) – 6.144 TFLOPS Peak', memory: 6144, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '5.837,compute', name: 'Xeon 6972P (Xeon 6, 120C P-Core) – 5.837 TFLOPS Peak', memory: 6144, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '4.838,compute', name: 'Xeon 6960P (Xeon 6, 96C P-Core) – 4.838 TFLOPS Peak', memory: 6144, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '4.301,compute', name: 'Xeon 6952P (Xeon 6, 80C P-Core) – 4.301 TFLOPS Peak', memory: 6144, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '4.147,compute', name: 'Xeon 6944P (Xeon 6, 64C P-Core) – 4.147 TFLOPS Peak', memory: 4096, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+
+  // ===== Xeon 6 – E-Core =====
+  { value: '4.128,compute', name: 'Xeon 6788P (Xeon 6, E-Core) – 4.128 TFLOPS Peak', memory: 3360, quantTypes: ['int8', 'bf16'], type: 'cpu' },
+  { value: '4.128,compute', name: 'Xeon 6787P (Xeon 6, E-Core) – 4.128 TFLOPS Peak', memory: 3360, quantTypes: ['int8', 'bf16'], type: 'cpu' },
+  { value: '3.891,compute', name: 'Xeon 6761P (Xeon 6, E-Core) – 3.891 TFLOPS Peak', memory: 3360, quantTypes: ['int8', 'bf16'], type: 'cpu' },
+
+  // ===== Xeon Platinum 8500 (Emerald Rapids) =====
+  { value: '3.277,compute', name: 'Xeon Platinum 8593Q – 3.277 TFLOPS Peak', memory: 2048, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '2.867,compute', name: 'Xeon Platinum 8592V – 2.867 TFLOPS Peak', memory: 2048, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+  { value: '2.688,compute', name: 'Xeon Platinum 8580 – 2.688 TFLOPS Peak', memory: 2048, quantTypes: ['int8', 'bf16', 'fp16'], type: 'cpu' },
+
+  // ===== Xeon CPU Max (HBM CPUs) =====
+  { value: '2.330,compute', name: 'Xeon CPU Max 9480 – 2.330 TFLOPS Peak (HBM)', memory: 4096, quantTypes: ['bf16', 'fp16'], type: 'cpu' },
+  { value: '2.304,compute', name: 'Xeon CPU Max 9468 – 2.304 TFLOPS Peak (HBM)', memory: 4096, quantTypes: ['bf16', 'fp16'], type: 'cpu' },
+
+  // ===== Xeon Platinum 8300 (Ice Lake) =====
+  { value: '2.304,compute', name: 'Xeon Platinum 8380 – 2.304 TFLOPS Peak', memory: 2048, quantTypes: ['int8'], type: 'cpu' },
+  { value: '2.189,compute', name: 'Xeon Platinum 8368 – 2.189 TFLOPS Peak', memory: 2048, quantTypes: ['int8'], type: 'cpu' }
 ];

@@ -19,18 +19,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.className} antialiased bg-slate-50 min-h-screen text-slate-900 selection:bg-indigo-100 selection:text-indigo-900`}>
+      <body className={`${inter.className} antialiased bg-slate-100 min-h-screen text-slate-900 selection:bg-indigo-100 selection:text-indigo-900`} suppressHydrationWarning>
         <div className="fixed inset-0 -z-10" aria-hidden="true">
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-white to-blue-100 opacity-95" />
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 opacity-95" />
 
           <div
             className="absolute -left-28 -top-24 w-80 h-80 rounded-full blur-3xl opacity-60"
-            style={{ background: 'radial-gradient(circle at 25% 25%, rgba(99,102,241,0.14), transparent 30%)' }}
+            style={{ background: 'radial-gradient(circle at 25% 25%, rgba(148,163,184,0.08), transparent 30%)' }}
           />
 
           <div
-            className="absolute -right-32 -bottom-28 w-96 h-96 rounded-full blur-2xl opacity-50"
-            style={{ background: 'radial-gradient(circle at 75% 75%, rgba(56,189,248,0.10), transparent 30%)' }}
+            className="absolute -right-32 -bottom-28 w-96 h-96 rounded-full blur-2xl opacity-40"
+            style={{ background: 'radial-gradient(circle at 75% 75%, rgba(148,163,184,0.06), transparent 30%)' }}
           />
         </div>
         {children}

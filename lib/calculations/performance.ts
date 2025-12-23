@@ -1,113 +1,142 @@
-import { CalculatorInputs, CalculatorResults, TokenBreakdown, TokenComputeCosts, KVCacheState, VRAMAllocation } from '../types';
-import { getModelArchitecture, getActiveParameters } from '../modelArchitectures';
-import * as Eq from '../equations';
-import { quantEfficiency, memoryBandwidth, calculateModelSize, calculateKVBytesPerToken, calculatePrefillFlopsPerToken, calculateDecodeFlopsPerToken, calculateVRAMSafetyBuffer } from '../calculationParameters';
-import { calculateTokenAwareResults } from './tokenAware';
+/**
+ * Performance Calculator
+ * 
+ * Calculates: Given N GPUs → How many users can this system support?
+ * 
+ * This is a thin wrapper around the unified core engine.
+ * All actual calculations happen in lib/core/core.ts to ensure
+ * mathematical alignment with the Capacity Planner.
+ */
 
-export function calculatePerformance(inputs: CalculatorInputs): CalculatorResults {
-  const { 
-    modelParams: N, 
-    utilization, 
-    inputLength, 
-    responseLength, 
-    thinkTime, 
-    quantType,
+import { CalculatorInputs, CalculatorResults } from '../types';
+import { calculateCore, type CoreInputs } from '../core';
+import { EFFICIENCY, SERVING, CAPACITY } from '../core/constants';
+import { normalizeQuantType } from '../core/equations';
+
+/**
+ * Map legacy CalculatorInputs to unified CoreInputs
+ */
+function mapToCore(inputs: CalculatorInputs): CoreInputs {
+  const {
+    modelParams,
+    hardwareOps,
+    units = 1,
+    kernelEfficiency = EFFICIENCY.DEFAULT_KERNEL_EFFICIENCY,
+    utilizationFactor,
+    utilization,
+    attentionOverhead = 0.1,
+    prefillOverhead = 0.1,
+    tokensPerSecPerUser = SERVING.DEFAULT_TOKENS_PER_SEC_PER_USER,
+    avgResponseTokensPerRequest,
+    inputLength = SERVING.DEFAULT_INPUT_TOKENS,
+    responseLength = SERVING.DEFAULT_AVG_RESPONSE_TOKENS,
+    quantType = 'fp16',
     tokenBreakdown,
-    coldStartRate = 0,
-    gpuMemoryGB,
-    useMoeArchitecture = false,
-    expertShards = 1,
+    gpuMemoryGB = 96,
+    isCPU = false,
     useCustomModel = false,
-    customTotalParams = 1
+    customTotalParams = 1,
+    offloadRatio = 0,
+    activeKvFraction = 1.0,
+    targetHeadroom = CAPACITY.DEFAULT_HEADROOM,
+    redundancyFactor = CAPACITY.DEFAULT_REDUNDANCY,
   } = inputs;
 
-  const modelName = useCustomModel ? 'custom' : undefined;
+  // Handle model parameters - if > 1000, assume raw count, divide by 1e9
+  const modelParamsBillions = modelParams > 1000 ? modelParams / 1e9 : modelParams;
+  const effectiveModelParams = useCustomModel ? customTotalParams : modelParamsBillions;
 
-  const tokens: TokenBreakdown = tokenBreakdown || {
-    systemPromptTokens: 0,
-    sessionHistoryTokens: 0,
-    newInputTokens: inputLength,
-    outputTokens: responseLength
-  };
+  // Fallback for utilizationFactor: use utilizationFactor if provided, else utilization, else default
+  const effectiveUtilization = utilizationFactor ?? utilization ?? EFFICIENCY.DEFAULT_UTILIZATION_FACTOR;
 
-  let activeParams: number;
-  if (useCustomModel) {
-    activeParams = customTotalParams;
-  } else {
-    const architecture = getModelArchitecture(N, modelName);
-    activeParams = getActiveParameters(N, architecture);
-  }
-
-  const Q = quantEfficiency[quantType];
-  const bw = memoryBandwidth[quantType].default;
-  const totalParamsForVRAM = useCustomModel ? customTotalParams : N;
-  const modelSizeGB = calculateModelSize(totalParamsForVRAM, quantType, modelName, expertShards);
-
-  const kvCacheBytesPerToken = 0; // legacy placeholder
-
-  const theoreticalCompute = 0; // simplified baseline for modularization
-
-  const sequenceLength = inputLength + responseLength;
-  const kvCacheSize = kvCacheBytesPerToken * sequenceLength / 1e9;
-  const memoryBoundLimit = bw / (modelSizeGB + kvCacheSize);
-  const theoretical = Math.min(theoreticalCompute, memoryBoundLimit);
-  const isMemoryBound = memoryBoundLimit < theoreticalCompute;
-
-  let realistic = theoretical * utilization * Q;
-
-  let prefillOverhead = 0;
-  if (inputLength > 100) {
-    prefillOverhead = Math.min(0.3, (inputLength / 1000) * 0.15);
-    realistic = realistic * (1 - prefillOverhead);
-  }
-
-  let attentionOverhead = 0;
-  if (sequenceLength > 2000) {
-    attentionOverhead = Math.min(0.4, ((sequenceLength - 2000) / 10000) * 0.2);
-    realistic = realistic * (1 - attentionOverhead);
-  }
-
-  const tokensPerSecPerUser = responseLength / thinkTime;
-  const users = realistic / tokensPerSecPerUser;
-  const words = realistic * 0.75;
-
-  let tokenCosts: TokenComputeCosts | undefined;
-  let kvCache: KVCacheState | undefined;
-  let vramAllocation: VRAMAllocation | undefined;
-
-  if (tokenBreakdown && gpuMemoryGB) {
-    const tokenAware = calculateTokenAwareResults({
-      tokenBreakdown,
-      gpuMemoryGB,
-      users: realistic,
-      coldStartRate,
-      quantType,
-      modelName,
-      modelParamsForCalc: useCustomModel ? customTotalParams : N,
-      hardwareOpsNeeded: 0,
-      hardwareOpsPerUnit: 0,
-      unitsNeededInitial: 1,
-      kvOffloading: false,
-      kvOffloadingPercentage: 0,
-      expertShards
-    });
-
-    tokenCosts = tokenAware.tokenCosts;
-    kvCache = tokenAware.kvCache;
-    vramAllocation = tokenAware.vramAllocation;
-  }
+  // Use token breakdown if available
+  const systemPromptTokens = tokenBreakdown?.systemPromptTokens ?? 0;
+  const sessionHistoryTokens = tokenBreakdown?.sessionHistoryTokens ?? 0;
+  const newInputTokens = tokenBreakdown?.newInputTokens ?? inputLength;
+  const avgResponse = avgResponseTokensPerRequest ?? tokenBreakdown?.outputTokens ?? responseLength;
 
   return {
-    theoretical,
-    realistic,
-    users,
+    modelParams: effectiveModelParams,
+    quantType: normalizeQuantType(quantType),
+    modelName: useCustomModel ? 'custom' : undefined,
+    useCustomModel,
+    peakFlops: hardwareOps,
+    vramPerUnit: gpuMemoryGB,
+    device: isCPU ? 'cpu' : 'gpu',
+    kernelEfficiency,
+    utilizationFactor: effectiveUtilization,
+    attentionOverhead,
+    prefillOverhead,
     tokensPerSecPerUser,
-    words,
-    isMemoryBound,
+    avgResponseTokensPerRequest: avgResponse,
+    newInputTokensPerRequest: newInputTokens,
+    systemPromptTokens,
+    sessionHistoryTokens,
+    activeKvFraction,
+    offloadRatio,
+    targetHeadroom,
+    numUnits: units,
+  };
+}
+
+/**
+ * Map CoreResults to legacy CalculatorResults
+ */
+function mapFromCore(coreResults: ReturnType<typeof calculateCore>, inputs: CalculatorInputs): CalculatorResults {
+  const {
+    attentionOverhead = 0.1,
+    prefillOverhead = 0.1,
+    redundancyFactor = CAPACITY.DEFAULT_REDUNDANCY,
+    targetHeadroom = CAPACITY.DEFAULT_HEADROOM,
+    offloadRatio = 0,
+    activeKvFraction = 1.0,
+    tokensPerSecPerUser = SERVING.DEFAULT_TOKENS_PER_SEC_PER_USER,
+  } = inputs;
+
+  return {
+    // Core outputs
+    theoretical: coreResults.maxThroughput,
+    realistic: coreResults.maxThroughput,
+    users: coreResults.maxUsers,
+    tokensPerSecPerUser,
+    words: coreResults.maxThroughput * 0.75, // Approximate word conversion
+    isMemoryBound: false, // Simplified - could be enhanced
+
+    // Overhead factors
     prefillOverhead,
     attentionOverhead,
-    tokenCosts,
-    kvCache,
-    vramAllocation
+    redundancyFactor,
+    targetHeadroom,
+    offloadRatio,
+    activeKvFraction,
+
+    // Additional calculated values
+    usableFlops: coreResults.totalSystemFlops,
+    maxThroughput: coreResults.maxThroughput,
+    maxUsers: coreResults.maxUsers,
+    totalOverheadMultiplier: coreResults.totalOverheadMultiplier,
+    effectiveFlopsPerGpu: coreResults.effectiveFlopsPerUnit,
+    flopsPerToken: coreResults.decodeFlopsPerToken,
+    decodeFlopsPerToken: coreResults.decodeFlopsPerToken,
+    tokenGenerationTime: coreResults.decodeFlopsPerToken > 0
+      ? coreResults.decodeFlopsPerToken / coreResults.totalSystemFlops
+      : 0,
   };
+}
+
+/**
+ * Calculate performance metrics for given hardware configuration
+ * 
+ * Uses the unified core engine to ensure mathematical alignment
+ * with the Capacity Planner.
+ */
+export function calculatePerformance(inputs: CalculatorInputs): CalculatorResults {
+  // Map to core inputs
+  const coreInputs = mapToCore(inputs);
+
+  // Call unified core engine
+  const coreResults = calculateCore(coreInputs);
+
+  // Map back to legacy format
+  return mapFromCore(coreResults, inputs);
 }

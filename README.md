@@ -166,6 +166,19 @@ For support or questions, please contact the development team.
 - Interactive charts and tables
 - Arabic language model support
 
+## ⚠️ Deprecation / Migration
+
+- The old function `calculateReverseInfrastructure` has been **renamed and replaced** by `calculateLlmInfrastructure` in `lib/calculations/llmInfrastructure.ts` for clearer intent and maintainability.
+- For backward compatibility we provide a small wrapper at `lib/calculations/reverse.ts` that forwards calls to the new implementation and emits a deprecation warning. The wrapper will be removed in a future release — please update any direct imports to use `calculateLlmInfrastructure` instead.
+
+## 🧰 Developer notes (cleanup)
+
+- Removed unused example helper `lib/examples/equationChecks.ts` (empty/placeholder).
+- Removed deprecated constant `FLOPS_PER_TOKEN` from `lib/equations/constants.ts` — it was unused.
+- Kept small backward-compatible re-exports and wrappers (e.g., `lib/modelArchitectures.ts`, `lib/calculations/reverse.ts`) to avoid breaking downstream consumers. These will be removed in a future major release after a transition window.
+
+**Developer action:** Run `npm test` and `npx tsc` locally after pulling these changes; if you maintain external integrations, update imports to use the new names.
+
 ---
 
 **Built with ❤️ by Finovate**

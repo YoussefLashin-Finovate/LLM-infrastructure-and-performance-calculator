@@ -2,7 +2,7 @@
  * Constants used across calculation modules
  */
 export const MODEL_SIZE_OVERHEAD = 1.2;
-export const REDUNDANCY_FACTOR = 1.15;
+export const REDUNDANCY_FACTOR = 5;
 
 export const PREFILL_BASE_OVERHEAD = 0.15;
 export const PREFILL_MAX_OVERHEAD = 0.3;
@@ -13,7 +13,7 @@ export const ATTENTION_MAX_OVERHEAD = 0.4;
 export const ATTENTION_THRESHOLD = 2000;
 export const ATTENTION_SCALING_FACTOR = 10000;
 
-export const THEORETICAL_CONSTANT = 6;
+export const THEORETICAL_CONSTANT = 2; // Use theoretical 2× params per token for decoder-only models
 export const BILLION = 1e9;
 
 export const KV_CACHE_CONSTANT_1 = 2;
@@ -25,8 +25,8 @@ export const KERNEL_EFFICIENCY_DEFAULT = 0.33;
 // VRAM and runtime tuning constants are kept local to the modules that need them.
 // Removed unused public defaults to reduce public API surface.
 
-export const TOKEN_FLOPS_PREFILL_K = 6.0;
-export const TOKEN_FLOPS_DECODE_K = 6.0;
+export const TOKEN_FLOPS_PREFILL_K = 2.0;
+export const TOKEN_FLOPS_DECODE_K = 2.0;
 
 export const bytesPerParam: Record<string, number> = {
   'fp32': 4,

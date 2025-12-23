@@ -85,4 +85,4 @@ export { calculatePerformance } from './calculations/performance';
 // Batching strategy implementation moved to `lib/calculations/batching.ts`.
 // The functions are imported at the top of this file and used where needed.
 
-export { calculateReverseInfrastructure } from './calculations/reverse';
+export { calculateLlmInfrastructure, calculateLlmInfrastructure as calculateReverseInfrastructure } from './calculations/llmInfrastructure';
