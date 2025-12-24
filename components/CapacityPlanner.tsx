@@ -1,15 +1,21 @@
 'use client';
-import { calculateModelSize } from '@/lib/calculationParameters';
-import { 
-  MODEL_OPTIONS, 
-  QUANTIZATION_OPTIONS, 
-  CALCULATION_CONSTANTS, 
+import { calculateModelSize, calculateFlopsMultiplier } from '@/lib/calculationParameters';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { formatFLOPS } from '@/lib/equations/format';
+import {
+  MODEL_OPTIONS,
+  QUANTIZATION_OPTIONS,
+  CALCULATION_CONSTANTS,
   HELPER_TEXT,
   UI_CONFIG,
-  INFO_CONTENT 
+  INFO_CONTENT
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
+import QuantizationSelect from '@/components/QuantizationSelect';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
+import { GpuSelector, CpuSelector, TokenConfiguration } from '@/components/shared';
+import CpuResults from '@/components/capacity/CpuResults';
+import { generateInfrastructureReport, ReportData, ReportSection } from '@/lib/pdfReporter';
 
 // Safe number formatter - prevents NaN from being rendered
 function safeNum(value: number | undefined, decimals: number = 1): string {
@@ -30,194 +36,134 @@ function getMemoryLabel(hardwareValue: string): string {
   return getHardwareType(hardwareValue) === 'cpu' ? 'System RAM' : 'VRAM';
 }
 
-// Format FLOPS to readable units
-function formatFLOPS(flops: number): string {
-  if (isNaN(flops) || !isFinite(flops)) return 'N/A FLOPS';
-  if (flops >= 1e15) {
-    return `${(flops / 1e15).toFixed(2)} PFLOPS`;
-  } else if (flops >= 1e12) {
-    return `${(flops / 1e12).toFixed(2)} TFLOPS`;
-  } else if (flops >= 1e9) {
-    return `${(flops / 1e9).toFixed(2)} GFLOPS`;
-  } else {
-    return `${flops.toFixed(2)} FLOPS`;
-  }
-}
+
 
 async function exportToPDF(inputs: any, results: any) {
   try {
-    const jsPDF = (await import('jspdf')).default;
-    
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-    
-    let yPos = 20;
-    const leftMargin = 20;
-    const rightMargin = 190;
-    const lineHeight = 7;
-    
-    const memoryLabel = getMemoryLabel(inputs.hardware);
-    
-    // Header
-    pdf.setFillColor(16, 185, 129);
-    pdf.rect(0, 0, 210, 40, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(24);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('LLM Infrastructure Report', leftMargin, 20);
-    pdf.setFontSize(12);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text('Capacity Planning Analysis', leftMargin, 30);
-    pdf.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), leftMargin, 36);
-    
-    yPos = 55;
-    pdf.setTextColor(0, 0, 0);
-    
-    // Section: Your Inputs
-    pdf.setFillColor(59, 130, 246);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('INPUT PARAMETERS', leftMargin, yPos);
-    yPos += 12;
-    
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-    
-    // Calculate effective model params
-    const effectiveModelParams = inputs.model === 'custom' ? inputs.customTotalParamsReverse : parseFloat(inputs.model);
-    
-    const inputData = [
-      ['Model Size:', `${effectiveModelParams.toFixed(1)}B parameters`],
-      ['Quantization Type:', inputs.quantization.toUpperCase()],
-      ['Hardware:', inputs.hardware.split('|')[0]],
-      ['Utilization:', `${(inputs.utilization * 100).toFixed(0)}%`],
-      ['Number of Users:', inputs.users.toString()],
-      ['Tokens/sec per User:', inputs.tokensPerSec.toString()],
-    ];
-    
-    if (inputs.useKVCache) {
-      inputData.push(
-        ['System Tokens:', `${inputs.systemPromptTokens} (cached)`],
-        ['History Tokens:', `${inputs.sessionHistoryTokens} (cached)`],
-        ['Input Tokens:', `${inputs.newInputTokens} (per request)`]
-      );
-    } else {
-      inputData.push(['Output Length:', `${inputs.inputLength} tokens`]);
-    }
-    
-    inputData.forEach(([label, value]) => {
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(label, leftMargin, yPos);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(value, leftMargin + 60, yPos);
-      yPos += lineHeight;
-    });
-    
-    yPos += 5;
-    
-    // Section: Computed Results
-    pdf.setFillColor(16, 185, 129);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('COMPUTED RESULTS', leftMargin, yPos);
-    yPos += 12;
-    
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-    
-    const flopsPerToken = parseFloat(inputs.model) * 2e9; // 2× for inference (forward pass only)
-    const totalTokensPerSec = inputs.users * inputs.tokensPerSec;
-    const totalFlopsPerSec = totalTokensPerSec * flopsPerToken;
-    
-    const resultsData = [
-      ['FLOPs per Parameter per Token:', '2.0 (inference)'],
-      ['FLOPs per Token:', formatFLOPS(flopsPerToken)],
-      ['Total Tokens/sec:', totalTokensPerSec.toFixed(1)],
-      ['Total FLOPs/sec:', formatFLOPS(totalFlopsPerSec)],
-      ['', ''],
-      ['Hardware Units Needed:', results.unitsNeeded.toString()],
-      ['Total System Throughput:', `${results.totalSystemThroughput.toFixed(1)} tokens/sec`],
-      ['Throughput per Unit:', `${results.throughputPerUnit.toFixed(1)} tokens/sec`],
-      ['System Headroom:', `${results.headroom.toFixed(0)}%`],
-      [`Total ${memoryLabel}:`, `${results.totalVRAM.toFixed(0)} GB`],
-      [`${memoryLabel} per Unit:`, `${results.vramPerUnit} GB`],
-      ['Model Size:', `${results.modelSize.toFixed(1)} GB`],
-    ];
-    
-    if (results.vramAllocation && results.vramAllocation.kvCacheGB > 0) {
-      resultsData.push(['KV Cache Memory:', `${results.vramAllocation.kvCacheGB.toFixed(2)} GB`]);
-      resultsData.push([`Total ${memoryLabel} per Unit:`, `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
-    }
-    
-    if (results.vramAllocation && results.vramAllocation.offloadedMemoryGB !== undefined && results.vramAllocation.offloadedMemoryGB > 0) {
-      const offloadedMem = results.vramAllocation.offloadedMemoryGB >= 1000 
-        ? `${(results.vramAllocation.offloadedMemoryGB / 1000).toFixed(2)} TB`
-        : `${results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB`;
-      resultsData.push(['CPU/NVMe Memory (KV Offloading):', offloadedMem]);
-    }
-    
-    resultsData.push(
-      ['Total Overhead:', `${results.totalOverheadPercent.toFixed(0)}%`],
-    );
-    
-    resultsData.forEach(([label, value]) => {
-      if (label === '') {
-        yPos += 3;
-        return;
+    const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
+    const hardwareLabel = selectedHW?.name || inputs.hardware;
+
+    const sections: ReportSection[] = [
+      {
+        title: 'Workload Requirements',
+        items: [
+          ['Target Users', (inputs.numUsers || inputs.users || 0).toString()],
+          ['Tokens/sec per User', (inputs.tokensPerSecPerUser || inputs.tokensPerSec || 0).toString()],
+          ['Quantization Level', (inputs.quantization || 'N/A').toUpperCase()],
+          ['Offload Ratio', `${((inputs.offloadRatio || 0) * 100).toFixed(0)}%`],
+        ]
+      },
+      {
+        title: 'Model Configuration',
+        items: [
+          ['Architecture', inputs.useMoeArchitecture ? 'Mixture of Experts (MoE)' : 'Dense'],
+          ['Total Parameters', inputs.useCustomModelReverse ? `${inputs.customTotalParamsReverse}B` : `${parseFloat(inputs.model) || 7}B`],
+          ['Active Parameters', inputs.useCustomModelReverse ? `${inputs.customActiveParamsReverse}B` : `${parseFloat(inputs.model) || 7}B`],
+          ['Quantization', (inputs.quantization || 'N/A').toUpperCase()],
+        ]
+      },
+      {
+        title: 'Hardware Specification',
+        items: [
+          ['Device Type', inputs.calcMode?.toUpperCase() || 'GPU'],
+          ['Hardware Model', hardwareLabel],
+          ['VRAM/RAM per Unit', `${selectedHW?.memory || 'N/A'} GB`],
+          ['Peak Performance', selectedHW ? formatFLOPS(parseHardwareOpsFromValue(selectedHW.value)) : 'N/A'],
+        ]
       }
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(label, leftMargin, yPos);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(value, leftMargin + 70, yPos);
-      yPos += lineHeight;
-    });
-    
-    yPos += 5;
-    
-    // Section: Overhead Breakdown
-    if (results.overheadBreakdown && results.overheadBreakdown.length > 0) {
-      pdf.setFillColor(100, 116, 139);
-      pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(14);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('OVERHEAD BREAKDOWN', leftMargin, yPos);
-      yPos += 12;
-      
-      pdf.setTextColor(0, 0, 0);
-      pdf.setFontSize(11);
-      pdf.setFont('helvetica', 'normal');
-      
-      results.overheadBreakdown.forEach((overhead: string) => {
-        pdf.text(`• ${overhead}`, leftMargin + 5, yPos);
-        yPos += lineHeight;
+    ];
+
+    const resultsSection: ReportSection = {
+      title: 'Infrastructure Sizing Results',
+      items: [
+        ['Units Needed', results.unitsNeeded?.toString() || '0'],
+        ['Total Throughput', `${(results.totalSystemThroughput || 0).toFixed(1)} tokens/sec`],
+        ['Throughput per Unit', `${(results.throughputPerUnit || 0).toFixed(1)} tokens/sec`],
+        ['Available Headroom', `${(results.headroom || 0).toFixed(0)}%`],
+      ]
+    };
+
+    const calculations: ReportSection[] = [
+      {
+        title: 'Memory & Compute Breakdown',
+        items: [
+          ['Model Weights', `${(results.modelSize || 0).toFixed(1)} GB`],
+          ['KV Cache per Unit', `${(results.kvVramPerGpu || results.vramAllocation?.kvCacheGB || 0).toFixed(2)} GB`],
+          ['Required VRAM/RAM', `${(results.requiredVramPerGpu || results.vramAllocation?.totalUsedGB || 0).toFixed(1)} GB`],
+          ['---', '---'],
+          ['Compute per Token', results.flopsPerToken ? formatFLOPS(results.flopsPerToken) : 'N/A'],
+          ['Total Required Compute', results.requiredFLOPS ? formatFLOPS(results.requiredFLOPS) : 'N/A'],
+          ['Total Available Compute', results.availableFLOPS ? formatFLOPS(results.availableFLOPS) : 'N/A'],
+        ]
+      }
+    ];
+
+    // Add CPU specific details if in CPU mode
+    if (inputs.calcMode === 'cpu' && results.cpuSizing) {
+      calculations.push({
+        title: 'CPU Inner Assumptions',
+        items: [
+          ['Prefill Multiplier (M)', inputs.cpuPrefillMultiplier?.toString() || '0.5'],
+          ['Utilization Target (U)', `${((inputs.cpuUtilizationTarget || 0) * 100).toFixed(0)}%`],
+          ['Redundancy Factor', `${((inputs.cpuRedundancy || 0) * 100).toFixed(0)}%`],
+          ['AMX Efficiency', `${((inputs.cpuAMXEfficiency || 0) * 100).toFixed(0)}%`],
+        ]
       });
     }
-    
-    // Footer
-    pdf.setFontSize(9);
-    pdf.setTextColor(100, 116, 139);
-    pdf.text('Generated by LLM Infrastructure Calculator', leftMargin, 275);
-    pdf.text(`Report ID: CAP-${Date.now()}`, leftMargin, 280);
-    pdf.text('© 2025 Finovate Team. All rights reserved.', leftMargin, 285);
-    
-    pdf.save(`Infrastructure-Capacity-Report-${Date.now()}.pdf`);
+
+    const reportData: ReportData = {
+      reportType: 'Capacity Planning',
+      modelName: inputs.useCustomModelReverse ? 'Custom Architecture' : `${parseFloat(inputs.model) || 7}B Model`,
+      hardwareName: hardwareLabel,
+      date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      preparedFor: 'System Architecture Team',
+      sections: [...sections, resultsSection],
+      calculations: calculations,
+      summary: `To support ${inputs.numUsers || inputs.users} concurrent users with a target of ${inputs.tokensPerSecPerUser || inputs.tokensPerSec} tokens/sec each, this infrastructure design requires ${results.unitsNeeded} units of ${hardwareLabel}. The system provides ${(results.totalSystemThroughput || 0).toFixed(1)} aggregate tokens/sec with ${(results.headroom || 0).toFixed(0)}% operational headroom.`
+    };
+
+    await generateInfrastructureReport(reportData);
   } catch (error) {
     console.error('Error generating PDF:', error);
-    alert('Failed to generate PDF. Please try again.');
+    alert('Failed to generate PDF report.');
   }
 }
 
+
 interface CapacityPlannerProps {
+  // Production-Grade Framework Mode
+  useProductionFramework?: boolean;
+  setUseProductionFramework?: (value: boolean) => void;
+  numUsers?: number;
+  setNumUsers?: (value: number) => void;
+  tokensPerSecPerUser?: number;
+  setTokensPerSecPerUser?: (value: number) => void;
+  peakFlops?: number;
+  setPeakFlops?: (value: number) => void;
+  vramPerGpu?: number;
+  setVramPerGpu?: (value: number) => void;
+  kernelEfficiency?: number;
+  setKernelEfficiency?: (value: number) => void;
+  utilizationFactor?: number;
+  setUtilizationFactor?: (value: number) => void;
+  attentionOverhead?: number;
+  setAttentionOverhead?: (value: number) => void;
+  prefillOverhead?: number;
+  setPrefillOverhead?: (value: number) => void;
+  targetHeadroom?: number;
+  setTargetHeadroom?: (value: number) => void;
+  systemPromptTokensPG?: number;
+  setSystemPromptTokensPG?: (value: number) => void;
+  sessionHistoryTokensPG?: number;
+  setSessionHistoryTokensPG?: (value: number) => void;
+  newInputTokensPerRequest?: number;
+  setNewInputTokensPerRequest?: (value: number) => void;
+  avgResponseTokensPerRequest?: number;
+  setAvgResponseTokensPerRequest?: (value: number) => void;
+  offloadRatio?: number;
+  setOffloadRatio?: (value: number) => void;
+
+  // Legacy fields (for backward compatibility)
   model: string;
   setModel: (value: string) => void;
   quantization: string;
@@ -257,10 +203,8 @@ interface CapacityPlannerProps {
   customActiveExpertsReverse: number;
   setCustomActiveExpertsReverse: (value: number) => void;
   // CPU/GPU mode and CPU-specific overrides
-  calcMode: 'auto' | 'cpu' | 'gpu';
-  setCalcMode: (mode: 'auto' | 'cpu' | 'gpu') => void;
-  cpuTps: number;
-  setCpuTps: (value: number) => void;
+  calcMode: 'cpu' | 'gpu';
+  setCalcMode: (mode: 'cpu' | 'gpu') => void;
   cpuPrefillMultiplier: number;
   setCpuPrefillMultiplier: (value: number) => void;
   cpuUtilizationTarget: number;
@@ -271,7 +215,24 @@ interface CapacityPlannerProps {
   setCpuAMXEfficiency: (value: number) => void;
   cpuModelRamOverhead: number;
   setCpuModelRamOverhead: (value: number) => void;
+  // Active KV session fraction and setter (0..1)
+  activeKvFraction?: number;
+  setActiveKvFraction?: (value: number) => void;
   results: {
+    // Production-grade results
+    decodeTokensPerSec?: number;
+    decodeFlopsPerSec?: number;
+    prefillFlopsPerRequest?: number;
+    prefillFlopsPerSec?: number;
+    requiredFlops?: number;
+    effectiveFlopsPerGpu?: number;
+    kvVramPerGpu?: number;
+    requiredVramPerGpu?: number;
+    gpuCountMemory?: number;
+    gpuCountCompute?: number;
+    gpuCount?: number;
+
+    // Legacy results
     unitsNeeded: number;
     throughputPerUnit: number;
     totalSystemThroughput: number;
@@ -280,6 +241,8 @@ interface CapacityPlannerProps {
     overheadBreakdown: string[];
     totalVRAM: number;
     totalFLOPS: number;
+    requiredFLOPS?: number;
+    availableFLOPS?: number;
     modelSize: number;
     vramPerUnit: number;
     vramAllocation?: {
@@ -321,17 +284,19 @@ interface CapacityPlannerProps {
     // CPU sizing results (when CPU path is used)
     cpuSizing?: {
       modelRamGB: number;
+      kvTotalGB?: number;           // Total KV cache required for workload (GB)
+      totalMemoryGB?: number;       // model + KV total memory required (GB)
+      memoryPerCPU?: number;        // memory required per CPU (GB)
       fitsOnSingleNode?: boolean;
       flopsPerTokenGFLOPS: number;
       totalFlopsTFLOPS: number;
       usableFlopsPerCPU?: number;
+      targetTPSPerCPU?: number;    // Computed TPS per CPU using formula
       cpusCompute: number;
-      TPS_CPU: number;
       cpusDecode: number;
       M_prefill: number;
       cpusWithPrefill: number;
       U_target: number;
-      cpusUtil: number;
       redundancy: number;
       finalCPUs: number;
       finalCPUsRounded: number;
@@ -343,6 +308,39 @@ interface CapacityPlannerProps {
 }
 
 export default function CapacityPlanner({
+  // Production-Grade Framework
+  useProductionFramework = false,
+  setUseProductionFramework,
+  numUsers = 100,
+  setNumUsers,
+  tokensPerSecPerUser = 10,
+  setTokensPerSecPerUser,
+  peakFlops = 1e15,
+  setPeakFlops,
+  vramPerGpu = 96,
+  setVramPerGpu,
+  kernelEfficiency = 0.5,
+  setKernelEfficiency,
+  utilizationFactor = 0.8,
+  setUtilizationFactor,
+  attentionOverhead = 0.1,
+  setAttentionOverhead,
+  prefillOverhead = 0.1,
+  setPrefillOverhead,
+  targetHeadroom = 0.1,
+  setTargetHeadroom,
+  systemPromptTokensPG = 0,
+  setSystemPromptTokensPG,
+  sessionHistoryTokensPG = 0,
+  setSessionHistoryTokensPG,
+  newInputTokensPerRequest = 100,
+  setNewInputTokensPerRequest,
+  avgResponseTokensPerRequest = 50,
+  setAvgResponseTokensPerRequest,
+  offloadRatio = 0,
+  setOffloadRatio,
+
+  // Legacy fields
   model,
   setModel,
   quantization,
@@ -384,8 +382,6 @@ export default function CapacityPlanner({
   // CPU/GPU mode & CPU overrides
   calcMode,
   setCalcMode,
-  cpuTps,
-  setCpuTps,
   cpuPrefillMultiplier,
   setCpuPrefillMultiplier,
   cpuUtilizationTarget,
@@ -396,17 +392,20 @@ export default function CapacityPlanner({
   setCpuAMXEfficiency,
   cpuModelRamOverhead,
   setCpuModelRamOverhead,
+  // Active KV session fraction
+  activeKvFraction = 0.05,
+  setActiveKvFraction,
   results,
 }: CapacityPlannerProps) {
   const hardwareGroups = useHardwareGroups(quantization);
-  
+
   // Calculate effective model params for display
   const effectiveModelParams = (useCustomModelReverse || model === 'custom') ? customTotalParamsReverse : parseFloat(model);
-  
+
   // Detect if CPU hardware is selected
   const selectedHW = hardwareDatabase.find(hw => hw.value === hardware);
   const isCPU = selectedHW?.type === 'cpu';
-  
+
   // Debug log to check if vramAllocation exists
   if (typeof window !== 'undefined') {
     console.log('🔍 CapacityPlanner Results:', {
@@ -419,869 +418,847 @@ export default function CapacityPlanner({
       allResults: results
     });
   }
-  
+
   return (
-    <div className="calc-grid">
-      {/* CPU Warning Banner */}
-      {isCPU && (
-        <div style={{
-          gridColumn: '1 / -1',
-          background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
-          border: '3px solid #f59e0b',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '24px',
-          boxShadow: '0 4px 6px rgba(245, 158, 11, 0.1)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'start', gap: '16px' }}>
-            <div style={{ fontSize: '32px' }}>⚠️</div>
-            <div style={{ flex: 1 }}>
-              <h4 style={{ 
-                color: '#92400e', 
-                margin: '0 0 12px 0', 
-                fontSize: '18px', 
-                fontWeight: '700' 
-              }}>
-                CPU-Based Inference Detected
-              </h4>
-              <div style={{ color: '#78350f', lineHeight: '1.6', fontSize: '14px' }}>
-                <p style={{ margin: '0 0 8px 0' }}>
-                  <strong>Reality Check:</strong> CPUs are heavily memory-bound for LLM inference. 
-                  Peak TOPS ratings do NOT translate to sustained throughput.
-                </p>
-                <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
-                  <li>Realistic utilization: <strong>15-30%</strong> of peak TOPS (auto-applied)</li>
-                  <li>Memory bandwidth is the primary bottleneck (DDR5: ~307 GB/s)</li>
-                  <li>Best for: Small models (&lt;20B params), dev/testing, cost optimization</li>
-                  <li>Production workloads &gt;20B params: <strong>Consider GPUs</strong></li>
-                </ul>
-                <p style={{ margin: '8px 0 0 0', fontStyle: 'italic' }}>
-                  💡 These calculations apply realistic CPU constraints. Unit counts may be significantly higher than GPU equivalents.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       {/* Input Panel */}
-      <div className="calc-input-panel">
-        <h3 style={{ 
-          marginBottom: '24px', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '10px',
-          fontSize: UI_CONFIG.typography.subheadingSize,
-          color: UI_CONFIG.colors.primary,
-          fontWeight: '800',
-          paddingBottom: '16px',
-          borderBottom: `3px solid ${UI_CONFIG.colors.borderLight}`
-        }}>
-          Requirements
+      <div className="bg-white/80 backdrop-blur-sm rounded-xl p-6 border border-slate-200/60 shadow-sm h-fit">
+        <h3 className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-slate-700 to-slate-500 bg-clip-text text-transparent mb-6 pb-4 border-b border-slate-100">
+          <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">⚙️</span> Requirements
         </h3>
-        
-        <div className="input-group">
-          <label style={{ display: 'block', marginBottom: 8 }}>Compute Mode</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setCalcMode('auto')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'auto' ? '#10b981' : '#f1f5f9', color: calcMode === 'auto' ? '#fff' : '#0f172a' }}>Auto</button>
-            <button onClick={() => setCalcMode('gpu')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'gpu' ? '#10b981' : '#f1f5f9', color: calcMode === 'gpu' ? '#fff' : '#0f172a' }}>GPU</button>
-            <button onClick={() => setCalcMode('cpu')} style={{ padding: '6px 10px', borderRadius: 6, background: calcMode === 'cpu' ? '#10b981' : '#f1f5f9', color: calcMode === 'cpu' ? '#fff' : '#0f172a' }}>CPU</button>
+
+        <div className="space-y-2 mb-6">
+          <label className="block text-sm font-semibold text-slate-700">Calculation Mode</label>
+          <div className="flex gap-2 p-1 bg-slate-100/80 rounded-lg w-fit">
+            <button
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all shadow-sm ${calcMode === 'gpu' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              onClick={() => setCalcMode('gpu')}
+            >
+              GPU Mode
+            </button>
+            <button
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all shadow-sm ${calcMode === 'cpu' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              onClick={() => setCalcMode('cpu')}
+            >
+              CPU Mode
+            </button>
           </div>
-          <small style={{ display: 'block', marginTop: 6, color: '#64748b' }}>Choose CPU to force CPU-based sizing or GPU for GPU sizing; Auto uses hardware selection.</small>
+          <p className="text-xs text-slate-500 pt-1">
+            {calcMode === 'gpu' ? 'Uses production-grade GPU sizing framework with explicit FLOPs and memory calculations.' : 'Uses CPU-based sizing with throughput and utilization targets.'}
+          </p>
         </div>
 
-        <div className="input-group">
-          <label htmlFor="reverse_model">Model Size</label>
-          <select id="reverse_model" value={model} onChange={(e) => {
-            setModel(e.target.value);
-            setUseCustomModelReverse(e.target.value === 'custom');
-          }}>
-            {MODEL_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.name}</option>
-            ))}
-          </select>
-          <small>{model !== 'custom' && HELPER_TEXT.modelSize(calculateModelSize(parseFloat(model), quantization))}</small>
-        </div>
+        {/* Production-Grade Framework Inputs (GPU Mode) */}
+        {calcMode === 'gpu' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+              <h4 className="text-blue-900 font-bold mb-4 flex items-center gap-2">
+                🚀 Production-Grade LLM GPU Sizing Framework
+              </h4>
 
-        {/* Custom Model Configuration */}
-        {useCustomModelReverse && (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.05) 100%)',
-            padding: '20px',
-            borderRadius: '12px',
-            border: '3px solid rgba(16, 185, 129, 0.3)',
-            marginBottom: '20px'
-          }}>
-            <h4 style={{ color: UI_CONFIG.colors.primary, marginBottom: '16px', fontWeight: '700' }}>
-              🎨 Custom Model Configuration
-            </h4>
-            
-            <div className="input-group">
-              <label htmlFor="custom_total_params_reverse">Total Parameters (Billions)</label>
-              <input 
-                type="number" 
-                id="custom_total_params_reverse" 
-                value={customTotalParamsReverse} 
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setCustomTotalParamsReverse(isNaN(val) ? 1 : val);
-                  // Auto-set active params to match total for dense models
-                  if (!useMoeArchitecture) {
-                    setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
-                  }
-                }}
-                min={0.1}
-                step={0.1}
-              />
-              <small>Total model parameters including all experts (if MoE)</small>
-            </div>
-
-            <div className="input-group">
-              <label htmlFor="custom_active_params_reverse">Active Parameters (Billions)</label>
-              <input 
-                type="number" 
-                id="custom_active_params_reverse" 
-                value={customActiveParamsReverse} 
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
-                }}
-                min={0.1}
-                step={0.1}
-                disabled={!useMoeArchitecture}
-              />
-              <small>Parameters used per token {!useMoeArchitecture && '(same as total for dense models)'}</small>
-            </div>
-
-            {useMoeArchitecture && (
-              <>
-                <div className="input-group">
-                  <label htmlFor="custom_total_experts_reverse">Total Experts</label>
-                  <input 
-                    type="number" 
-                    id="custom_total_experts_reverse" 
-                    value={customTotalExpertsReverse} 
+              {/* User & Throughput */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="space-y-2">
+                  <label htmlFor="pg_num_users" className="block text-sm font-medium text-blue-800">Number of Users</label>
+                  <input
+                    type="number"
+                    id="pg_num_users"
+                    value={numUsers}
                     onChange={(e) => {
                       const val = parseInt(e.target.value);
-                      setCustomTotalExpertsReverse(isNaN(val) ? 1 : val);
+                      if (setNumUsers) setNumUsers(isNaN(val) ? 100 : val);
                     }}
-                    min={1}
-                    step={1}
+                    min="1"
+                    className="w-full px-3 py-2 bg-white border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <small>Total number of expert networks</small>
                 </div>
-
-                <div className="input-group">
-                  <label htmlFor="custom_active_experts_reverse">Active Experts per Token</label>
-                  <input 
-                    type="number" 
-                    id="custom_active_experts_reverse" 
-                    value={customActiveExpertsReverse} 
+                <div className="space-y-2">
+                  <label htmlFor="pg_tokens_per_sec_per_user" className="block text-sm font-medium text-blue-800">Tokens/sec per User</label>
+                  <input
+                    type="number"
+                    id="pg_tokens_per_sec_per_user"
+                    value={tokensPerSecPerUser}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value);
-                      setCustomActiveExpertsReverse(isNaN(val) ? 1 : val);
+                      const val = parseFloat(e.target.value);
+                      if (setTokensPerSecPerUser) setTokensPerSecPerUser(isNaN(val) ? 10 : val);
                     }}
-                    min={1}
-                    step={1}
+                    min="0.1"
+                    step="0.1"
+                    className="w-full px-3 py-2 bg-white border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <small>Number of experts activated per token</small>
                 </div>
-
-                <div style={{ 
-                  background: 'rgba(16, 185, 129, 0.1)', 
-                  padding: '12px', 
-                  borderRadius: '8px',
-                  marginTop: '12px'
-                }}>
-                  <strong style={{ color: UI_CONFIG.colors.primary }}>📊 Configuration Summary:</strong>
-                  <ul style={{ marginTop: '8px', marginBottom: '0', paddingLeft: '20px' }}>
-                    <li>Total: {customTotalParamsReverse}B params → VRAM: {(customTotalParamsReverse * (quantization === 'fp16' ? 2 : quantization === 'int8' ? 1 : 0.5)).toFixed(1)}GB</li>
-                    <li>Active: {customActiveParamsReverse}B params ({((customActiveParamsReverse / customTotalParamsReverse) * 100).toFixed(1)}% of total)</li>
-                    <li>Experts: {customActiveExpertsReverse}/{customTotalExpertsReverse} active ({((customActiveExpertsReverse / customTotalExpertsReverse) * 100).toFixed(1)}%)</li>
-                    <li>Compute reduction: {((1 - customActiveParamsReverse / customTotalParamsReverse) * 100).toFixed(1)}%</li>
-                  </ul>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        <div className="input-group" style={{ 
-          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(79, 70, 229, 0.05) 100%)',
-          padding: '16px',
-          borderRadius: '8px',
-          border: '2px solid rgba(99, 102, 241, 0.2)'
-        }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: '700' }}>
-            <input 
-              type="checkbox" 
-              checked={useMoeArchitecture}
-              onChange={(e) => setUseMoeArchitecture(e.target.checked)}
-              style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-            />
-            <span>Enable MoE Architecture</span>
-          </label>
-          <small style={{ display: 'block', marginTop: '8px', marginLeft: '30px', color: '#4f46e5', fontWeight: '600' }}>
-            Use Mixture-of-Experts architecture calculations (affects compute and memory usage)
-          </small>
-        </div>
-
-        <div className="input-group">
-          <label htmlFor="reverse_quantization">Quantization Level</label>
-          <select id="reverse_quantization" value={quantization} onChange={(e) => setQuantization(e.target.value)}>
-            {QUANTIZATION_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.name}</option>
-            ))}
-          </select>
-          <small>{HELPER_TEXT.quantizationNote}</small>
-        </div>
-
-        <div className="input-group">
-          <label htmlFor="reverse_users">Required Concurrent Users</label>
-          <input 
-            type="number" 
-            id="reverse_users" 
-            value={users}
-            onChange={(e) => {
-              const val = parseInt(e.target.value);
-              setUsers(isNaN(val) ? 1 : val);
-            }}
-            step={CALCULATION_CONSTANTS.steps.users}
-            min="1" 
-          />
-          <small>{HELPER_TEXT.usersNote}</small>
-        </div>
-
-        <div className="input-group" style={{ 
-          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.05) 100%)',
-          padding: '16px',
-          borderRadius: '8px',
-          border: '2px solid rgba(16, 185, 129, 0.2)'
-        }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: '700' }}>
-            <input 
-              type="checkbox" 
-              checked={useKVCache}
-              onChange={(e) => setUseKVCache(e.target.checked)}
-              style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-            />
-            <span>Enable KV Cache Mode (Token-Aware)</span>
-          </label>
-          <small style={{ display: 'block', marginTop: '8px', marginLeft: '30px' }}>
-            Split tokens into per-session (cached) and per-request (new) for accurate compute modeling
-          </small>
-          
-          {isCPU && (
-            <div style={{ 
-              marginTop: '12px', 
-              padding: '12px',
-              background: 'rgba(59, 130, 246, 0.1)',
-              borderRadius: '8px',
-              fontSize: '13px',
-              color: '#1e40af',
-              border: '2px solid rgba(59, 130, 246, 0.2)'
-            }}>
-              ℹ️ <strong>Note:</strong> KV cache offloading is not available for CPU-only inference. 
-              CPUs already use system RAM for all operations (model weights + KV cache).
-            </div>
-          )}
-        </div>
-
-        {useKVCache && !isCPU && (
-          <div className="input-group" style={{ 
-            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(37, 99, 235, 0.05) 100%)',
-            padding: '16px',
-            borderRadius: '8px',
-            border: '2px solid rgba(59, 130, 246, 0.2)',
-            marginTop: '-8px'
-          }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontWeight: '700' }}>
-              <input 
-                type="checkbox" 
-                checked={kvOffloading}
-                onChange={(e) => setKvOffloading(e.target.checked)}
-                style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-              />
-              <span>Enable KV Cache Offloading (CPU/NVMe)</span>
-            </label>
-            <small style={{ display: 'block', marginTop: '8px', marginLeft: '30px' }}>
-              {kvOffloading 
-                ? '✓ GPU count optimized with KV cache offloading'
-                : '✗ GPU count based on VRAM (model + KV cache must fit in GPU memory)'}
-            </small>
-            
-            {kvOffloading && (
-              <div style={{ marginTop: '16px', marginLeft: '30px', paddingLeft: '16px', borderLeft: '3px solid rgba(59, 130, 246, 0.3)' }}>
-                <label htmlFor="offloading_percentage" style={{ fontSize: '14px', fontWeight: '600', display: 'block', marginBottom: '8px' }}>
-                  Offloading Percentage: {kvOffloadingPercentage}%
-                </label>
-                <input
-                  id="offloading_percentage"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="5"
-                  value={kvOffloadingPercentage}
-                  onChange={(e) => setKvOffloadingPercentage(Number(e.target.value))}
-                  style={{ 
-                    width: '100%', 
-                    height: '6px',
-                    cursor: 'pointer',
-                    accentColor: '#3b82f6'
-                  }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                  <span>0% (All in VRAM)</span>
-                  <span>50% (Balanced)</span>
-                  <span>100% (All offloaded)</span>
-                </div>
-                <small style={{ display: 'block', marginTop: '8px', fontSize: '13px', color: '#64748b' }}>
-                  {kvOffloadingPercentage === 0 && '💾 All KV cache in GPU VRAM (high performance, high VRAM usage)'}
-                  {kvOffloadingPercentage > 0 && kvOffloadingPercentage < 50 && '⚡ Mostly in VRAM (good performance, moderate offloading)'}
-                  {kvOffloadingPercentage >= 50 && kvOffloadingPercentage < 100 && '⚖️ Balanced split (reduces GPU memory, some CPU overhead)'}
-                  {kvOffloadingPercentage === 100 && '🔄 Fully offloaded (minimal VRAM, compute-based GPU count)'}
-                </small>
               </div>
-            )}
+
+              {/* Model Parameters */}
+              {!useCustomModelReverse && (
+                <div className="space-y-2 mb-4">
+                  <label htmlFor="pg_model_params" className="block text-sm font-medium text-blue-800">Model Parameters (Billions)</label>
+                  <input
+                    type="number"
+                    id="pg_model_params"
+                    value={parseFloat(model) || 7}
+                    onChange={(e) => setModel(e.target.value)}
+                    min="0.1"
+                    step="0.1"
+                    className="w-full px-3 py-2 bg-white border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-blue-600">Use Custom Model Configuration below for detailed MoE setup</p>
+                </div>
+              )}
+
+
+
+              {/* Custom Model Toggle */}
+              <div className="bg-slate-50/50 rounded-lg p-4 border border-slate-200 mb-4">
+                <label className="flex items-center gap-3 cursor-pointer font-bold text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={useCustomModelReverse}
+                    onChange={(e) => setUseCustomModelReverse(e.target.checked)}
+                    className="w-5 h-5 text-slate-600 rounded focus:ring-slate-500 border-gray-300"
+                  />
+                  <span>Use Custom Model Configuration</span>
+                </label>
+                <p className="mt-2 ml-8 text-xs text-slate-700 font-medium">
+                  Enable detailed model configuration with MoE support and custom parameters
+                </p>
+              </div>
+
+              {/* Custom Model Configuration */}
+              {useCustomModelReverse && (
+                <div className="bg-emerald-50/50 rounded-lg p-5 border border-emerald-200 mb-4">
+                  <h4 className="text-emerald-900 font-bold mb-4 flex items-center gap-2">
+                    🎨 Custom Model Configuration
+                  </h4>
+
+                  <div className="space-y-2 mb-4">
+                    <label htmlFor="pg_custom_total_params" className="block text-sm font-medium text-emerald-800">Total Parameters (Billions)</label>
+                    <input
+                      type="number"
+                      id="pg_custom_total_params"
+                      value={customTotalParamsReverse}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setCustomTotalParamsReverse(isNaN(val) ? 1 : val);
+                        // Auto-set active params to match total for dense models
+                        if (!useMoeArchitecture) {
+                          setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
+                        }
+                      }}
+                      min={0.1}
+                      step={0.1}
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <p className="text-xs text-emerald-700">Total model parameters including all experts (if MoE)</p>
+                  </div>
+
+                  <div className="space-y-2 mb-4">
+                    <label htmlFor="pg_custom_active_params" className="block text-sm font-medium text-emerald-800">Active Parameters (Billions)</label>
+                    <input
+                      type="number"
+                      id="pg_custom_active_params"
+                      value={customActiveParamsReverse}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
+                      }}
+                      min={0.1}
+                      step={0.1}
+                      disabled={!useMoeArchitecture}
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                    <p className="text-xs text-emerald-700">Parameters used per token {!useMoeArchitecture && '(same as total for dense models)'}</p>
+                  </div>
+
+                  {/* MoE Architecture Toggle */}
+                  <div className="bg-emerald-100/50 rounded-lg p-4 border border-emerald-200 mb-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useMoeArchitecture}
+                        onChange={(e) => setUseMoeArchitecture(e.target.checked)}
+                        className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 border-gray-300"
+                      />
+                      <span className="text-sm font-medium text-emerald-900">Use Mixture of Experts (MoE) Architecture</span>
+                    </label>
+                    <p className="text-xs text-emerald-700 mt-2 ml-8">
+                      Enable MoE routing where only a subset of experts are active per token, reducing computation while maintaining model capacity.
+                    </p>
+                  </div>
+
+                  {useMoeArchitecture && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="space-y-1">
+                          <label htmlFor="pg_custom_total_experts" className="block text-sm font-medium text-emerald-800">Total Experts</label>
+                          <input
+                            type="number"
+                            id="pg_custom_total_experts"
+                            value={customTotalExpertsReverse}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setCustomTotalExpertsReverse(isNaN(val) ? 8 : val);
+                            }}
+                            min={1}
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor="pg_custom_active_experts" className="block text-sm font-medium text-emerald-800">Active Experts</label>
+                          <input
+                            type="number"
+                            id="pg_custom_active_experts"
+                            value={customActiveExpertsReverse}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setCustomActiveExpertsReverse(isNaN(val) ? 2 : val);
+                            }}
+                            min={1}
+                            max={customTotalExpertsReverse}
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-100/50 p-4 rounded-lg mt-4 text-sm text-emerald-900 border border-emerald-200">
+                        <strong className="block mb-2 text-emerald-800">📊 Configuration Summary:</strong>
+                        <ul className="list-disc pl-5 space-y-1 text-emerald-700">
+                          <li>Total: {customTotalParamsReverse}B params → VRAM: {(customTotalParamsReverse * (quantization === 'fp16' ? 2 : quantization === 'int8' ? 1 : 0.5)).toFixed(1)}GB</li>
+                          <li>Active: {customActiveParamsReverse}B params ({((customActiveParamsReverse / customTotalParamsReverse) * 100).toFixed(1)}% of total)</li>
+                          <li>Experts: {customActiveExpertsReverse}/{customTotalExpertsReverse} active ({((customActiveExpertsReverse / customTotalExpertsReverse) * 100).toFixed(1)}%)</li>
+                          <li>Compute reduction: {((1 - customActiveParamsReverse / customTotalParamsReverse) * 100).toFixed(1)}%</li>
+                        </ul>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Quantization */}
+              <div className="space-y-2 mb-4">
+                <label className="block text-sm font-medium text-blue-800">Quantization Level</label>
+                <select
+                  value={quantization}
+                  onChange={(e) => setQuantization(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-blue-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {QUANTIZATION_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Shared GPU Selector (replacing Hardware & Efficiency controls) */}
+              <GpuSelector
+                hardware={hardware}
+                setHardware={setHardware}
+                quantization={quantization}
+
+                // Efficiency & Overheads (provide defaults for required props)
+                kernelEfficiency={kernelEfficiency ?? 0.85}
+                setKernelEfficiency={setKernelEfficiency ?? (() => { })}
+                utilizationFactor={utilizationFactor ?? 0.8}
+                setUtilizationFactor={setUtilizationFactor ?? (() => { })}
+                attentionOverhead={attentionOverhead ?? 0.1}
+                setAttentionOverhead={setAttentionOverhead ?? (() => { })}
+                prefillOverhead={prefillOverhead ?? 0.2}
+                setPrefillOverhead={setPrefillOverhead ?? (() => { })}
+
+                // Headroom (capacity mode specific)
+                targetHeadroom={targetHeadroom}
+                setTargetHeadroom={setTargetHeadroom}
+                showHeadroom={true}
+
+                variant="indigo"
+              />
+
+              {/* GPU Characteristics (Auto-populated from hardware) */}
+              <div className="bg-blue-50/50 rounded-lg p-4 border border-blue-200 mb-4 mt-4">
+                <h4 className="text-sm font-semibold text-blue-800 mb-3">GPU Characteristics (Auto-populated)</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-blue-700">Peak FLOPs per GPU</label>
+                    <div className="px-3 py-2 bg-white border border-blue-300 rounded-md text-sm text-blue-900 font-mono">
+                      {(() => {
+                        const selectedHW = hardwareDatabase.find(h => h.value === hardware);
+                        if (selectedHW) {
+                          const ops = parseHardwareOpsFromValue(hardware);
+                          return formatFLOPS(ops);
+                        }
+                        return 'Select hardware above';
+                      })()}
+                    </div>
+                    <p className="text-xs text-blue-600">Auto-calculated from selected GPU</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-blue-700">VRAM per GPU</label>
+                    <div className="px-3 py-2 bg-white border border-blue-300 rounded-md text-sm text-blue-900 font-mono">
+                      {(() => {
+                        const selectedHW = hardwareDatabase.find(h => h.value === hardware);
+                        return selectedHW ? `${selectedHW.memory} GB` : 'Select hardware above';
+                      })()}
+                    </div>
+                    <p className="text-xs text-blue-600">Auto-calculated from selected GPU</p>
+                  </div>
+                </div>
+              </div>
+
+              <TokenConfiguration
+                systemPromptTokens={systemPromptTokensPG}
+                setSystemPromptTokens={setSystemPromptTokensPG!}
+                sessionHistoryTokens={sessionHistoryTokensPG}
+                setSessionHistoryTokens={setSessionHistoryTokensPG!}
+                newInputTokens={newInputTokensPerRequest}
+                setNewInputTokens={setNewInputTokensPerRequest!}
+                avgResponseTokensPerRequest={avgResponseTokensPerRequest}
+                setAvgResponseTokensPerRequest={setAvgResponseTokensPerRequest}
+                offloadRatio={offloadRatio}
+                setOffloadRatio={setOffloadRatio}
+                showOffloadRatio={true}
+                variant="blue"
+              />
+            </div>
           </div>
         )}
 
-        {!useKVCache ? (
-          <div className="input-group">
-            <label htmlFor="reverse_input">Avg Input Length (tokens)</label>
-            <input 
-              type="number" 
-              id="reverse_input" 
-              value={inputLength}
-              onChange={(e) => {
-                const val = parseInt(e.target.value);
-                setInputLength(isNaN(val) ? 1 : val);
-              }}
-              step={CALCULATION_CONSTANTS.steps.inputLength}
-              min="1" 
-            />
-            <small>{HELPER_TEXT.inputLengthNote}</small>
-          </div>
-        ) : (
-          <>
-            <div className="input-group" style={{ borderLeft: '3px solid rgba(16, 185, 129, 0.5)', paddingLeft: '12px' }}>
-              <label htmlFor="reverse_system_prompt">System Prompt (tokens) - Per Session</label>
-              <input 
-                type="number" 
-                id="reverse_system_prompt" 
-                value={systemPromptTokens}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  setSystemPromptTokens(Math.min(Math.max(val, 0), 100000));
-                }}
-                step="100"
-                min="0"
-                max="100000"
-              />
-              <small>Cached once per session (e.g., instructions, RAG context)</small>
-            </div>
-
-            <div className="input-group" style={{ borderLeft: '3px solid rgba(16, 185, 129, 0.5)', paddingLeft: '12px' }}>
-              <label htmlFor="reverse_history">Session History (tokens) - Per Session</label>
-              <input 
-                type="number" 
-                id="reverse_history" 
-                value={sessionHistoryTokens}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value) || 0;
-                  setSessionHistoryTokens(Math.min(Math.max(val, 0), 200000));
-                }}
-                step="100"
-                min="0"
-                max="200000"
-              />
-              <small>Conversation history cached in session (grows over time)</small>
-            </div>
-
-            <div className="input-group" style={{ borderLeft: '3px solid rgba(59, 130, 246, 0.5)', paddingLeft: '12px' }}>
-              <label htmlFor="reverse_new_input">New Input (tokens) - Per Request</label>
-              <input 
-                type="number" 
-                id="reverse_new_input" 
-                value={newInputTokens}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value) || 1;
-                  setNewInputTokens(Math.min(Math.max(val, 1), 100000));
-                }}
-                step="50"
-                min="1"
-                max="100000"
-              />
-              <small>User's new input requiring prefill compute every request</small>
-            </div>
-          </>
-        )}
-
-        <div className="input-group">
-          <label htmlFor="reverse_tokens">Output Tokens/sec per User</label>
-          <input 
-            type="number" 
-            id="reverse_tokens" 
-            value={tokensPerSec}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              setTokensPerSec(isNaN(val) ? 0.1 : val);
-            }}
-            step={CALCULATION_CONSTANTS.steps.tokensPerSec}
-            min="0.1" 
-          />
-          <small>{HELPER_TEXT.outputRateNote}</small>
-        </div>
-
+        {/* CPU Mode Inputs */}
         {calcMode === 'cpu' && (
-          <div style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.03) 0%, rgba(59,130,246,0.02) 100%)', padding: 16, borderRadius: 8, border: '2px solid rgba(59,130,246,0.06)', marginBottom: 12 }}>
-            <h4 style={{ margin: '0 0 12px 0', fontWeight: 700 }}>CPU Configuration (overrides)</h4>
-            <div className="input-group">
-              <label htmlFor="cpu_tps">TPS per CPU (decode)</label>
-              <input id="cpu_tps" type="number" value={cpuTps} onChange={(e) => setCpuTps(parseFloat(e.target.value) || 0)} step={1} min={1} />
-              <small>Empirical tokens/sec per CPU (default: 8)</small>
-            </div>
-            <div className="input-group">
-              <label htmlFor="cpu_prefill">Prefill multiplier (M_prefill)</label>
-              <input id="cpu_prefill" type="number" value={cpuPrefillMultiplier} onChange={(e) => setCpuPrefillMultiplier(parseFloat(e.target.value) || 1)} step={0.1} min={1} />
-              <small>Long-context prefill cost multiplier (default: 2.5)</small>
-            </div>
-            <div className="input-group">
-              <label htmlFor="cpu_util">Target utilization (U_target)</label>
-              <input id="cpu_util" type="number" value={cpuUtilizationTarget} onChange={(e) => setCpuUtilizationTarget(parseFloat(e.target.value) || 0.1)} step={0.01} min={0.1} max={1} />
-              <small>Typical sustained utilization (default: 0.65)</small>
-            </div>
-            <div className="input-group">
-              <label htmlFor="cpu_redundancy">Redundancy multiplier</label>
-              <input id="cpu_redundancy" type="number" value={cpuRedundancy} onChange={(e) => setCpuRedundancy(parseFloat(e.target.value) || 1)} step={0.01} min={1} />
-              <small>N+1 redundancy factor (default: 1.15)</small>
-            </div>
-            <div className="input-group">
-              <label htmlFor="cpu_amx">AMX sustained efficiency</label>
-              <input id="cpu_amx" type="number" value={cpuAMXEfficiency} onChange={(e) => setCpuAMXEfficiency(parseFloat(e.target.value) || 0.15)} step={0.01} min={0} max={1} />
-              <small>Sustained AMX efficiency to use instead of peak (0.15-0.25 recommended)</small>
-            </div>
-            <div className="input-group">
-              <label htmlFor="cpu_model_overhead">Model RAM overhead</label>
-              <input id="cpu_model_overhead" type="number" value={cpuModelRamOverhead} onChange={(e) => setCpuModelRamOverhead(parseFloat(e.target.value) || 1)} step={0.01} min={1} />
-              <small>Memory overhead for embeddings/scales/buffers (default: 1.2)</small>
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg p-4 border border-orange-200">
+              <h4 className="text-orange-900 font-bold mb-4 flex items-center gap-2">
+                🖥️ CPU-Based Sizing Framework
+              </h4>
+
+              {/* Basic Parameters (Users & Throughput) */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="space-y-2">
+                  <label htmlFor="cpu_users" className="block text-sm font-medium text-orange-800">Number of Users</label>
+                  <input
+                    type="number"
+                    id="cpu_users"
+                    value={users}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setUsers(isNaN(val) ? 100 : val);
+                    }}
+                    min="1"
+                    className="w-full px-3 py-2 bg-white border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="cpu_tokens_per_sec" className="block text-sm font-medium text-orange-800">Tokens/sec per User</label>
+                  <input
+                    type="number"
+                    id="cpu_tokens_per_sec"
+                    value={tokensPerSec}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setTokensPerSec(isNaN(val) ? 10 : val);
+                    }}
+                    min="0.1"
+                    step="0.1"
+                    className="w-full px-3 py-2 bg-white border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              {/* Model Parameters */}
+              {!useCustomModelReverse && (
+                <div className="space-y-2 mb-4">
+                  <label htmlFor="cpu_model" className="block text-sm font-medium text-orange-800">Model Parameters (Billions)</label>
+                  <input
+                    type="number"
+                    id="cpu_model"
+                    value={parseFloat(model) || 7}
+                    onChange={(e) => setModel(e.target.value)}
+                    min="0.1"
+                    step="0.1"
+                    className="w-full px-3 py-2 bg-white border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              )}
+
+              {/* Custom Model Toggle (CPU Mode) */}
+              <div className="bg-slate-50/50 rounded-lg p-4 border border-slate-200 mb-4">
+                <label className="flex items-center gap-3 cursor-pointer font-bold text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={useCustomModelReverse}
+                    onChange={(e) => setUseCustomModelReverse(e.target.checked)}
+                    className="w-5 h-5 text-slate-600 rounded focus:ring-slate-500 border-gray-300"
+                  />
+                  <span>Use Custom Model Configuration</span>
+                </label>
+                <p className="mt-2 ml-8 text-xs text-slate-700 font-medium">
+                  Enable detailed model configuration with MoE support and custom parameters
+                </p>
+              </div>
+
+              {/* Custom Model Configuration (CPU Mode) */}
+              {useCustomModelReverse && (
+                <div className="bg-emerald-50/50 rounded-lg p-5 border border-emerald-200 mb-4">
+                  <h4 className="text-emerald-900 font-bold mb-4 flex items-center gap-2">
+                    🎨 Custom Model Configuration
+                  </h4>
+
+                  <div className="space-y-2 mb-4">
+                    <label htmlFor="cpu_custom_total_params" className="block text-sm font-medium text-emerald-800">Total Parameters (Billions)</label>
+                    <input
+                      type="number"
+                      id="cpu_custom_total_params"
+                      value={customTotalParamsReverse}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setCustomTotalParamsReverse(isNaN(val) ? 1 : val);
+                        if (!useMoeArchitecture) {
+                          setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
+                        }
+                      }}
+                      min={0.1}
+                      step={0.1}
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <p className="text-xs text-emerald-700">Total model parameters including all experts (if MoE)</p>
+                  </div>
+
+                  <div className="space-y-2 mb-4">
+                    <label htmlFor="cpu_custom_active_params" className="block text-sm font-medium text-emerald-800">Active Parameters (Billions)</label>
+                    <input
+                      type="number"
+                      id="cpu_custom_active_params"
+                      value={customActiveParamsReverse}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setCustomActiveParamsReverse(isNaN(val) ? 1 : val);
+                      }}
+                      min={0.1}
+                      step={0.1}
+                      disabled={!useMoeArchitecture}
+                      className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:bg-slate-50"
+                    />
+                    <p className="text-xs text-emerald-700">Parameters used per token {!useMoeArchitecture && '(same as total for dense models)'}</p>
+                  </div>
+
+                  {/* MoE Architecture Toggle */}
+                  <div className="bg-emerald-100/50 rounded-lg p-4 border border-emerald-200 mb-4">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useMoeArchitecture}
+                        onChange={(e) => setUseMoeArchitecture(e.target.checked)}
+                        className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 border-gray-300"
+                      />
+                      <span className="text-sm font-medium text-emerald-900">Use Mixture of Experts (MoE) Architecture</span>
+                    </label>
+                    <p className="text-xs text-emerald-700 mt-2 ml-8">
+                      Enable MoE routing where only a subset of experts are active per token, reducing computation while maintaining model capacity.
+                    </p>
+                  </div>
+
+                  {useMoeArchitecture && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div className="space-y-1">
+                          <label htmlFor="cpu_custom_total_experts" className="block text-sm font-medium text-emerald-800">Total Experts</label>
+                          <input
+                            type="number"
+                            id="cpu_custom_total_experts"
+                            value={customTotalExpertsReverse}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setCustomTotalExpertsReverse(isNaN(val) ? 8 : val);
+                            }}
+                            min={1}
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label htmlFor="cpu_custom_active_experts" className="block text-sm font-medium text-emerald-800">Active Experts</label>
+                          <input
+                            type="number"
+                            id="cpu_custom_active_experts"
+                            value={customActiveExpertsReverse}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              setCustomActiveExpertsReverse(isNaN(val) ? 2 : val);
+                            }}
+                            min={1}
+                            max={customTotalExpertsReverse}
+                            className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-100/50 p-4 rounded-lg mt-4 text-sm text-emerald-900 border border-emerald-200">
+                        <strong>MoE Efficiency:</strong> With {customActiveExpertsReverse} active experts out of {customTotalExpertsReverse} total, you're using {(customActiveParamsReverse / customTotalParamsReverse * 100).toFixed(1)}% of the model's parameters per token.
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Quantization Level */}
+              <div className="space-y-2 mb-4">
+                <label className="block text-sm font-medium text-orange-800">Quantization Level</label>
+                <select
+                  value={quantization}
+                  onChange={(e) => setQuantization(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  {QUANTIZATION_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <CpuSelector
+                // CPU Parameters
+                cpuPrefillMultiplier={cpuPrefillMultiplier}
+                setCpuPrefillMultiplier={setCpuPrefillMultiplier}
+                cpuUtilizationTarget={cpuUtilizationTarget}
+                setCpuUtilizationTarget={setCpuUtilizationTarget}
+                cpuRedundancy={cpuRedundancy}
+                setCpuRedundancy={setCpuRedundancy}
+                cpuAMXEfficiency={cpuAMXEfficiency}
+                setCpuAMXEfficiency={setCpuAMXEfficiency}
+                cpuModelRamOverhead={cpuModelRamOverhead}
+                setCpuModelRamOverhead={setCpuModelRamOverhead}
+
+                // Token Config (CPU mode)
+                systemPromptTokens={systemPromptTokens}
+                setSystemPromptTokens={setSystemPromptTokens}
+                sessionHistoryTokens={sessionHistoryTokens}
+                setSessionHistoryTokens={setSessionHistoryTokens}
+                newInputTokens={newInputTokens}
+                setNewInputTokens={setNewInputTokens}
+                activeKvFraction={activeKvFraction}
+                setActiveKvFraction={setActiveKvFraction}
+                showActiveKvFraction={true}
+              />
+
+              {/* CPU Hardware Selection */}
+              <div className="space-y-2 mb-4">
+                <label className="block text-sm font-medium text-orange-800">CPU Hardware</label>
+                <select
+                  value={hardwareDatabase.find(h => h.value === hardware && h.type === 'cpu')?.value || ''}
+                  onChange={(e) => setHardware(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-orange-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="">-- Select CPU --</option>
+                  {hardwareGroups
+                    .map((group: any) => ({ family: group.family, options: group.options.filter((hw: any) => hw.type === 'cpu') }))
+                    .filter((g: any) => g.options.length > 0)
+                    .map((group: any) => (
+                      <optgroup key={group.family} label={group.family}>
+                        {group.options.map((hw: any, idx: number) => (
+                          <option key={idx} value={hw.value}>{hw.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                </select>
+                <p className="text-xs text-orange-600">CPU options compatible with selected quantization</p>
+              </div>
+
+              {/* CPU Characteristics (Auto-populated) */}
+              <div className="bg-orange-50/50 rounded-lg p-4 border border-orange-200 mb-4">
+                <h4 className="text-sm font-semibold mb-3 text-orange-800">CPU Characteristics (Auto-populated)</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-orange-700">Peak FLOPs per CPU</label>
+                    <div className="px-3 py-2 bg-white border border-orange-300 rounded-md text-sm font-mono text-orange-900">
+                      {(() => {
+                        const selectedHW = hardwareDatabase.find(h => h.value === hardware);
+                        if (selectedHW) {
+                          const ops = parseHardwareOpsFromValue(hardware);
+                          return formatFLOPS(ops);
+                        }
+                        return 'Select hardware above';
+                      })()}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-orange-700">System RAM per CPU</label>
+                    <div className="px-3 py-2 bg-white border border-orange-300 rounded-md text-sm font-mono text-orange-900">
+                      {(() => {
+                        const selectedHW = hardwareDatabase.find(h => h.value === hardware);
+                        return selectedHW ? `${selectedHW.memory} GB` : 'Select hardware above';
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="input-group">
-          <label htmlFor="reverse_hardware">Target Hardware</label>
-          <select id="reverse_hardware" value={hardware} onChange={(e) => setHardware(e.target.value)}>
-            {hardwareGroups.map((group: any) => (
-              <optgroup key={group.family} label={group.family}>
-                {group.options.map((hw: any, idx: number) => {
-                  const memDisplay = hw.type === 'cpu' 
-                    ? `(Max: ${hw.memory >= 1000 ? (hw.memory / 1000).toFixed(1) + 'TB' : hw.memory + 'GB'} DDR5)` 
-                    : `- ${hw.memory}GB VRAM`;
-                  return (
-                    <option key={idx} value={hw.value}>
-                      {hw.name} {memDisplay}
-                    </option>
-                  );
-                })}
-              </optgroup>
-            ))}
-          </select>
-          <small>All hardware options available ({hardwareGroups.reduce((acc: number, g: any) => acc + g.options.length, 0)} total)</small>
-        </div>
-
-        <div className="input-group">
-          <label htmlFor="reverse_util">Utilization Factor</label>
-          <input 
-            type="number" 
-            id="reverse_util" 
-            value={utilization}
-            onChange={(e) => {
-              const val = parseFloat(e.target.value);
-              setUtilization(isNaN(val) ? 0.1 : val);
-            }}
-            step={CALCULATION_CONSTANTS.steps.utilization}
-            min={CALCULATION_CONSTANTS.utilizationMin}
-            max={CALCULATION_CONSTANTS.utilizationMax}
-          />
-          <small>{HELPER_TEXT.utilizationTypical}</small>
-        </div>
       </div>
 
       {/* Results Panel */}
-      <div className="calc-results-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h3 style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '10px',
-            fontSize: UI_CONFIG.typography.subheadingSize,
-            color: UI_CONFIG.colors.primary,
-            fontWeight: '800',
-            paddingBottom: '16px',
-            borderBottom: `3px solid ${UI_CONFIG.colors.borderLight}`,
-            flex: 1
-          }}>
-            Infrastructure Requirements
+      <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 h-fit sticky top-6">
+        <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+          <h3 className="flex items-center gap-2 text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
+            <span className="text-2xl">📊</span> Capacity Analysis
           </h3>
           <button
-            onClick={() => exportToPDF({
-              model, quantization, hardware, users, tokensPerSec, inputLength,
-              systemPromptTokens, sessionHistoryTokens, newInputTokens, useKVCache
+            onClick={() => exportToPDF(calcMode === 'gpu' ? {
+              // Production-grade framework inputs
+              useProductionFramework: true,
+              numUsers, tokensPerSecPerUser, peakFlops, vramPerGpu, kernelEfficiency,
+              utilizationFactor, attentionOverhead, prefillOverhead,
+              targetHeadroom, systemPromptTokens: systemPromptTokensPG,
+              sessionHistoryTokens: sessionHistoryTokensPG, newInputTokens: newInputTokensPerRequest,
+              offloadRatio, model, quantization, hardware, useCustomModelReverse, customTotalParamsReverse
+            } : {
+              // CPU mode inputs
+              calcMode: 'cpu',
+              users, tokensPerSec, model, quantization, hardware,
+              cpuPrefillMultiplier, cpuUtilizationTarget, cpuRedundancy, cpuAMXEfficiency, cpuModelRamOverhead,
+              // Token fields for CPU mode
+              systemPromptTokens, sessionHistoryTokens, newInputTokens
             }, results)}
-            style={{
-              padding: '10px 20px',
-              background: '#10b981',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '14px',
-              marginBottom: '16px'
-            }}
+            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-lg text-sm font-bold transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
           >
             Export Report
           </button>
         </div>
 
-        {/* Your Inputs Section */}
-        <div style={{ 
-          background: 'rgba(59, 130, 246, 0.05)',
-          padding: '20px',
-          borderRadius: '12px',
-          border: '2px solid rgba(59, 130, 246, 0.2)',
-          marginBottom: '20px'
-        }}>
-          <h4 style={{ 
-            fontSize: '16px',
-            fontWeight: '700',
-            color: '#3b82f6',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            Your Inputs
-          </h4>
-          <div style={{ display: 'grid', gap: '12px', fontSize: '14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Model Size:</span>
-              <span style={{ fontWeight: '600' }}>{effectiveModelParams.toFixed(1)}B params</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Quantization Type:</span>
-              <span style={{ fontWeight: '600' }}>{quantization.toUpperCase()}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Hardware FLOPS:</span>
-              <span style={{ fontWeight: '600' }}>{hardware.split('|')[0]}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Number of Users:</span>
-              <span style={{ fontWeight: '600' }}>{users}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Tokens/sec per User:</span>
-              <span style={{ fontWeight: '600' }}>{tokensPerSec}</span>
-            </div>
-            {useKVCache ? (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>System Tokens:</span>
-                  <span style={{ fontWeight: '600' }}>{systemPromptTokens}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>History Tokens:</span>
-                  <span style={{ fontWeight: '600' }}>{sessionHistoryTokens}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Input Tokens:</span>
-                  <span style={{ fontWeight: '600' }}>{newInputTokens}</span>
-                </div>
-              </>
-            ) : (
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(59, 130, 246, 0.1)' }}>
-                <span style={{ color: '#64748b' }}>Output Length:</span>
-                <span style={{ fontWeight: '600' }}>{inputLength} tokens</span>
-              </div>
-            )}
+        {/* Show placeholder when no hardware is selected */}
+        {!hardwareDatabase.find(h => h.value === hardware && h.type === (calcMode === 'cpu' ? 'cpu' : 'gpu')) ? (
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">⚙️</div>
+            <h3 className="text-xl font-semibold text-slate-700 mb-2">Configure parameters to see analysis</h3>
+            <p className="text-slate-500">Select hardware and configure your requirements above to view capacity analysis.</p>
           </div>
-        </div>
-
-        {/* Internally Computed Values Section */}
-        <div style={{ 
-          background: 'rgba(16, 185, 129, 0.05)',
-          padding: '20px',
-          borderRadius: '12px',
-          border: '2px solid rgba(16, 185, 129, 0.2)',
-          marginBottom: '20px'
-        }}>
-          <h4 style={{ 
-            fontSize: '16px',
-            fontWeight: '700',
-            color: '#10b981',
-            marginBottom: '16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-           Internally Computed Values
-          </h4>
-          <div style={{ display: 'grid', gap: '12px', fontSize: '14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Model Size after Quantization:</span>
-              <span style={{ fontWeight: '600' }}>{results.modelSize.toFixed(1)} GB ({quantization.toUpperCase()})</span>
-            </div>
-            {useKVCache && results.vramAllocation && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>KV Cache Memory per Session:</span>
-                  <span style={{ fontWeight: '600' }}>{results.vramAllocation.kvCacheGB.toFixed(2)} GB</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Total KV Cache for {users} Users:</span>
-                  <span style={{ fontWeight: '600' }}>{(results.vramAllocation.kvCacheGB * users).toFixed(2)} GB</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Total {getMemoryLabel(hardware)} per Unit (Model + All KV + Buffer):</span>
-                  <span style={{ fontWeight: '600' }}>{(results.modelSize + (results.vramAllocation.kvCacheGB * users) + results.vramAllocation.safetyBufferGB).toFixed(1)} GB</span>
-                </div>
-              </>
-            )}
-            {useKVCache && !results.vramAllocation && results.kvCache && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>KV Cache Memory per Session:</span>
-                  <span style={{ fontWeight: '600' }}>{results.kvCache.kvMemoryGB.toFixed(2)} GB</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>KV Cache Total ({users} users):</span>
-                  <span style={{ fontWeight: '600' }}>{(results.kvCache.kvMemoryGB * users).toFixed(2)} GB</span>
-                </div>
-              </>
-            )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>FLOPs per Parameter per Token:</span>
-              <span style={{ fontWeight: '600' }}>2.0 (inference)</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>FLOPs per Token:</span>
-              <span style={{ fontWeight: '600' }}>{formatFLOPS(effectiveModelParams * 2e9)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Total Tokens/sec:</span>
-              <span style={{ fontWeight: '600' }}>{(users * tokensPerSec).toFixed(1)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Total FLOPs/sec:</span>
-              <span style={{ fontWeight: '600' }}>{formatFLOPS((users * tokensPerSec) * effectiveModelParams * 2e9)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-              <span style={{ color: '#64748b' }}>Hardware Units Needed:</span>
-              <span style={{ fontWeight: '600', fontSize: '18px', color: '#10b981' }}>{isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded}</span>
-            </div>
-            {isCPU && results.cpuSizing && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
-                  <span style={{ color: '#64748b' }}>Model RAM (with overhead):</span>
-                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.modelRamGB} GB</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
-                  <span style={{ color: '#64748b' }}>Final CPUs (N+1, rounded):</span>
-                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.finalCPUsRounded}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
-                  <span style={{ color: '#64748b' }}>Delivered TPS (safety applied):</span>
-                  <span style={{ fontWeight: '600' }}>{results.cpuSizing.deliveredTPS} t/s</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.05)' }}>
-                  <span style={{ color: '#64748b' }}>Sanity Check:</span>
-                  <span style={{ fontWeight: '600', color: results.cpuSizing.sanityPass ? '#059669' : '#b91c1c' }}>{results.cpuSizing.sanityPass ? 'PASS' : 'FAIL'}</span>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Additional Details */}
-        <div className="result-card">
-          <div className="result-content">
-            <div className="result-label">Total System Throughput</div>
-            <div className="result-value">{safeNum(results.totalSystemThroughput, 1)} t/s</div>
-            <div className="result-sublabel">
-              ({safeNum(results.throughputPerUnit, 1)} tokens/sec per unit, {safeNum(results.headroom, 0)}% spare capacity)
-            </div>
-          </div>
-        </div>
-
-        <div className="result-card">
-          <div className="result-content">
-            <div className="result-label">Total {getMemoryLabel(hardware)} Accumulated</div>
-            <div className="result-value">{results.totalVRAM.toFixed(0)} GB</div>
-            <div className="result-sublabel">
-              Model Size: {results.modelSize.toFixed(1)} GB ({quantization.toUpperCase()}) per unit
-              {results.vramAllocation && results.vramAllocation.kvCacheGB > 0 && (
-                <>
-                  <br/>
-                  + KV Cache: {safeNum(results.vramAllocation.kvCacheGB, 2)} GB per unit
-                </>
-              )}
-              <br/>
-              ({safeNum(results.vramPerUnit, 1)} GB × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units)
-            </div>
-            {results.vramAllocation && results.vramAllocation.kvCacheGB > 0 ? (
-              <div className="result-equation">
-                Per unit: {safeNum(results.vramAllocation.modelWeightsGB, 1)} GB (model) + 
-                {safeNum(results.vramAllocation.kvCacheGB, 2)} GB (KV) + 
-                {safeNum(results.vramAllocation.safetyBufferGB, 1)} GB (buffer) = 
-                {isNaN(results.vramAllocation.totalUsedGB) ? 'N/A' : results.vramAllocation.totalUsedGB.toFixed(1)} GB × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units
+        ) : calcMode === 'gpu' && results.unitsNeeded > 0 ? (
+          <div className="space-y-4">
+            {/* Primary Result Card */}
+            <div className="p-5 rounded-xl bg-gradient-to-br from-slate-50 to-white border border-slate-200 shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-full blur-2xl opacity-60 -mr-6 -mt-6 pointer-events-none"></div>
+              <div className="text-sm font-semibold text-slate-500 mb-1 uppercase tracking-wide relative z-10">Hardware Units Needed</div>
+              <div className="text-4xl font-extrabold text-slate-900 mb-2 relative z-10">{results.unitsNeeded} <span className="text-lg font-normal text-slate-600">x {selectedHW?.name || 'Units'}</span></div>
+              <div className="text-xs text-slate-600 font-medium bg-white/80 p-2 rounded-lg border border-slate-200 inline-block backdrop-blur-sm relative z-10">
+                System Throughput: <span className="font-bold text-emerald-600">{safeNum(results.totalSystemThroughput, 1)}</span> tokens/sec total
               </div>
-            ) : (
-              <div className="result-equation">
-                Model: {isNaN(results.modelSize) ? 'N/A' : results.modelSize.toFixed(1)} GB after {quantization.toUpperCase()} × {isNaN(results.unitsNeeded) ? 'N/A' : results.unitsNeeded} units = {isNaN(results.totalVRAM) ? 'N/A' : results.totalVRAM.toFixed(0)} GB total
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Offloaded Memory Section (when KV cache offloading is enabled) */}
-        {results.vramAllocation && results.vramAllocation.offloadedMemoryGB !== undefined && results.vramAllocation.offloadedMemoryGB > 0 && (
-          <div className="result-card">
-            <div className="result-content">
-              <div className="result-label">
-                {results.vramAllocation.offloadingPercentage === 100 
-                  ? 'CPU/NVMe Memory Required' 
-                  : `Partial KV Cache Offloading (${results.vramAllocation.offloadingPercentage}%)`
-                }
+            {/* Throughput & Headroom Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
+                <div className="text-xs text-blue-700 font-semibold uppercase mb-1">Per Unit T/s</div>
+                <div className="text-xl font-bold text-blue-900">{safeNum(results.throughputPerUnit, 1)}</div>
               </div>
-              <div className="result-value">
-                {results.vramAllocation.offloadedMemoryGB >= 1000 
-                  ? `${(results.vramAllocation.offloadedMemoryGB / 1000).toFixed(2)} TB`
-                  : `${results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB`
-                }
+              <div className="p-3 rounded-lg bg-indigo-50/50 border border-indigo-100">
+                <div className="text-xs text-indigo-700 font-semibold uppercase mb-1">Headroom</div>
+                <div className="text-xl font-bold text-indigo-900">{safeNum(results.headroom, 0)}%</div>
               </div>
-              <div className="result-sublabel">
-                {results.vramAllocation.offloadingPercentage === 100 ? (
+            </div>
+
+            {/* Production-Grade Framework Results */}
+            <div className="bg-blue-50/50 rounded-xl p-4 border border-blue-200">
+              <h4 className="font-bold text-blue-900 text-sm mb-3 flex items-center gap-2">
+                <span>🚀</span> Production-Grade Framework Breakdown
+              </h4>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="space-y-2">
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Decode Tokens/sec</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.decodeTokensPerSec?.toFixed(1) || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Decode FLOPs/sec</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.decodeFlopsPerSec ? formatFLOPS(results.decodeFlopsPerSec) : 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Prefill FLOPs/Request</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.prefillFlopsPerRequest ? formatFLOPS(results.prefillFlopsPerRequest) : 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Prefill FLOPs/sec</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.prefillFlopsPerSec ? formatFLOPS(results.prefillFlopsPerSec) : 'N/A'}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Required FLOPs <span className="text-xs text-slate-500 font-normal">(workload only)</span></span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.requiredFlops ? formatFLOPS(results.requiredFlops) : 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Effective FLOPs/GPU</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.effectiveFlopsPerGpu ? formatFLOPS(results.effectiveFlopsPerGpu) : 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">KV VRAM/GPU</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.kvVramPerGpu?.toFixed(1) || 'N/A'} GB</span>
+                  </div>
+                  <div className="flex justify-between border-b border-blue-100 pb-1">
+                    <span className="text-blue-700">Required VRAM/GPU</span>
+                    <span className="font-mono text-blue-900 font-semibold">{results.requiredVramPerGpu?.toFixed(1) || 'N/A'} GB</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                <div className="bg-blue-100/50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-blue-700 font-semibold uppercase mb-1">Memory GPUs</div>
+                  <div className="text-xl font-bold text-blue-900">{results.gpuCountMemory || 'N/A'}</div>
+                </div>
+                <div className="bg-blue-100/50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-blue-700 font-semibold uppercase mb-1">Compute GPUs</div>
+                  <div className="text-xl font-bold text-blue-900">{results.gpuCountCompute || 'N/A'}</div>
+                </div>
+                <div className="bg-blue-100/50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-blue-700 font-semibold uppercase mb-1">Final GPUs</div>
+                  <div className="text-xl font-bold text-blue-900">{results.gpuCount || results.unitsNeeded}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Key Metrics List */}
+            <div className="bg-slate-50/50 rounded-xl p-4 border border-slate-200">
+              <h4 className="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
+                <span>📉</span> Key Metrics
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span className="text-slate-500">Number of Users</span>
+                  <span className="font-semibold text-slate-900">{useProductionFramework ? numUsers : users}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span className="text-slate-500">Tokens/sec/User</span>
+                  <span className="font-semibold text-slate-900">{useProductionFramework ? tokensPerSecPerUser : tokensPerSec}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1">
+                  <span className="text-slate-500">Quantization</span>
+                  <span className="font-semibold text-slate-900">{quantization.toUpperCase()}</span>
+                </div>
+                {(useKVCache || useProductionFramework) && (
                   <>
-                    All KV cache offloaded from GPU VRAM to system memory
-                    <br/>
-                    ({users} users × {results.vramAllocation.offloadedMemoryGB / users < 1 
-                      ? `${(results.vramAllocation.offloadedMemoryGB / users * 1024).toFixed(0)} MB` 
-                      : `${(results.vramAllocation.offloadedMemoryGB / users).toFixed(2)} GB`} per user)
-                  </>
-                ) : (
-                  <>
-                    {results.vramAllocation.offloadingPercentage}% of KV cache offloaded to CPU/NVMe
-                    <br/>
-                    {results.vramAllocation.kvCacheInVRAM !== undefined && (
-                      <>{results.vramAllocation.kvCacheInVRAM.toFixed(1)} GB remaining in GPU VRAM</>
-                    )}
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500">System Tokens</span>
+                      <span className="font-semibold text-slate-900">{useProductionFramework ? systemPromptTokensPG : systemPromptTokens}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500">Context/History</span>
+                      <span className="font-semibold text-slate-900">{useProductionFramework ? sessionHistoryTokensPG : sessionHistoryTokens}</span>
+                    </div>
                   </>
                 )}
               </div>
-              {results.vramAllocation.offloadingPercentage === 100 ? (
-                <div className="result-equation">
-                  Total KV Cache: {results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB stored in CPU RAM or NVMe
-                </div>
-              ) : (
-                <div className="result-equation">
-                  Split: {results.vramAllocation.kvCacheInVRAM?.toFixed(1)} GB in VRAM + {results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB in CPU/NVMe
-                </div>
-              )}
-              <div style={{ 
-                marginTop: '12px', 
-                padding: '12px', 
-                backgroundColor: results.vramAllocation.offloadingPercentage === 100 
-                  ? 'rgba(59, 130, 246, 0.1)' 
-                  : 'rgba(168, 85, 247, 0.1)', 
-                borderRadius: '8px',
-                fontSize: '13px',
-                color: results.vramAllocation.offloadingPercentage === 100 ? '#3b82f6' : '#a855f7'
-              }}>
-                <strong>💡 Tip:</strong> {results.vramAllocation.offloadingPercentage === 100 
-                  ? 'Ensure your system has sufficient RAM or fast NVMe storage for optimal performance'
-                  : 'Partial offloading reduces GPU memory pressure while maintaining some KV cache in fast VRAM'
-                }
-              </div>
             </div>
-          </div>
-        )}
 
-        {/* Batching Strategy Section */}
-        {results.batchingStrategy && (
-          <div className="result-card">
-            <div className="result-content">
-              <div className="result-label" style={{ marginBottom: '16px' }}>Batching Strategy</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Batch Size per GPU:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.requestsPerBatch} requests</span>
+            {/* Internally Computed Values */}
+            <div className="bg-emerald-50/30 rounded-xl p-4 border border-emerald-100">
+              <h4 className="font-bold text-emerald-800 text-sm mb-3 flex items-center gap-2">
+                <span>🧠</span> Internally Computed Values
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between border-b border-emerald-100/50 pb-1">
+                  <span className="text-slate-500">Model Size</span>
+                  <span className="font-mono text-emerald-700 font-semibold">{results.modelSize.toFixed(1)} GB</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Max Batch Size (VRAM-limited):</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.maxBatchSizePerGPU} requests</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Batches per GPU:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.numBatchesPerGPU}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Total Batches (all GPUs):</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.totalBatches}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>KV Cache per Batch:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.kvCachePerBatch.toFixed(2)} GB</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Expected Batch Latency:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.latencyMs.toFixed(0)} ms</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>Throughput per GPU:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.throughputPerGPU.toFixed(1)} tokens/sec</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(16, 185, 129, 0.1)' }}>
-                  <span style={{ color: '#64748b' }}>GPU Utilization:</span>
-                  <span style={{ fontWeight: '600' }}>{results.batchingStrategy.utilizationPercent.toFixed(0)}%</span>
-                </div>
-                
-                {/* Constraints */}
-                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(16, 185, 129, 0.05)', borderRadius: '8px' }}>
-                  <div style={{ fontWeight: '600', marginBottom: '8px', color: '#10b981' }}>Constraints:</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
-                    {results.batchingStrategy.constraints.vramLimited && (
-                      <div style={{ color: '#ef4444' }}>⚠️ VRAM-Limited</div>
-                    )}
-                    {results.batchingStrategy.constraints.computeLimited && (
-                      <div style={{ color: '#3b82f6' }}>💻 Compute-Limited</div>
-                    )}
-                    {results.batchingStrategy.constraints.latencyLimited && (
-                      <div style={{ color: '#f59e0b' }}>⏱️ Latency-Limited</div>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Recommendations */}
-                {results.batchingStrategy.recommendations.length > 0 && (
-                  <div style={{ marginTop: '12px', padding: '12px', backgroundColor: 'rgba(59, 130, 246, 0.05)', borderRadius: '8px' }}>
-                    <div style={{ fontWeight: '600', marginBottom: '8px', color: '#3b82f6' }}>Recommendations:</div>
-                    <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', color: '#64748b' }}>
-                      {results.batchingStrategy.recommendations.map((rec: string, idx: number) => (
-                        <li key={idx} style={{ marginBottom: '4px' }}>{rec}</li>
-                      ))}
-                    </ul>
-                  </div>
+
+                {useKVCache && results.vramAllocation && (
+                  <>
+                    <div className="flex justify-between border-b border-emerald-100/50 pb-1">
+                      <span className="text-slate-500">KV Memory/Session</span>
+                      <span className="font-mono text-emerald-700 font-semibold">{results.vramAllocation.kvCacheGB.toFixed(2)} GB</span>
+                    </div>
+                    <div className="flex justify-between border-b border-emerald-100/50 pb-1">
+                      <span className="text-slate-500">Total {getMemoryLabel(hardware)}/Unit</span>
+                      <span className="font-mono text-emerald-700 font-bold">{(results.modelSize + (results.vramAllocation.kvCacheGB * users) + results.vramAllocation.safetyBufferGB).toFixed(1)} GB</span>
+                    </div>
+                  </>
                 )}
+
+                <div className="flex justify-between border-b border-emerald-100/50 pb-1">
+                  <span className="text-slate-500">FLOPs/Token</span>
+                  <span className="font-mono text-emerald-700">{(results.totalSystemThroughput > 0 && results.requiredFLOPS) ? formatFLOPS(results.requiredFLOPS / results.totalSystemThroughput) : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-slate-500">Required System FLOPs</span>
+                  <span className="font-mono text-emerald-700">{formatFLOPS(results.requiredFLOPS || 0)} <span className="text-xs text-slate-500">(workload only)</span></span>
+                </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-slate-500">Available System FLOPs</span>
+                  <span className="font-mono text-emerald-700">{formatFLOPS(results.availableFLOPS || 0)}</span>
+                </div>
               </div>
             </div>
+
+            {/* Offloaded Memory Section */}
+            {results.vramAllocation && results.vramAllocation.offloadedMemoryGB !== undefined && results.vramAllocation.offloadedMemoryGB > 0 && (
+              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                <h4 className="font-bold text-amber-900 text-sm mb-2 opacity-90">
+                  {results.vramAllocation.offloadingPercentage === 100 ? 'System Memory Required' : `Partial Offloading (${results.vramAllocation.offloadingPercentage}%)`}
+                </h4>
+                <div className="flex justify-between items-end">
+                  <span className="text-xs text-amber-800">CPU RAM / NVMe</span>
+                  <span className="text-xl font-bold text-amber-900">{results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB</span>
+                </div>
+                <div className="mt-2 text-xs text-amber-700 italic border-t border-amber-200 pt-2">
+                  Ensure host system has at least {(results.vramAllocation.offloadedMemoryGB * 1.2).toFixed(1)} GB available RAM
+                </div>
+              </div>
+            )}
+
+            {/* Batching Strategy */}
+            {results.batchingStrategy && (
+              <div className="bg-indigo-50/50 rounded-xl p-4 border border-indigo-100">
+                <h4 className="font-bold text-indigo-900 text-sm mb-3 flex items-center gap-2">
+                  <span>🔄</span> Batching Strategy
+                </h4>
+                <div className="space-y-2 text-xs text-indigo-800">
+                  <div className="flex justify-between border-b border-indigo-100 pb-1">
+                    <span className="text-indigo-700">Batch Size/GPU</span>
+                    <span className="font-semibold text-indigo-900">{results.batchingStrategy.requestsPerBatch}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-indigo-100 pb-1">
+                    <span className="text-indigo-700">Max Batch (VRAM)</span>
+                    <span className="font-semibold text-indigo-900">{results.batchingStrategy.maxBatchSizePerGPU}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-indigo-100 pb-1">
+                    <span className="text-indigo-700">Latency</span>
+                    <span className="font-semibold text-indigo-900">{results.batchingStrategy.latencyMs.toFixed(0)} ms</span>
+                  </div>
+                  <div className="flex justify-between border-b border-indigo-100 pb-1">
+                    <span className="text-indigo-700">Throughput/GPU</span>
+                    <span className="font-semibold text-indigo-900">{results.batchingStrategy.throughputPerGPU.toFixed(1)} t/s</span>
+                  </div>
+
+                  {/* Constraints */}
+                  <div className="mt-2 pt-2 border-t border-indigo-200">
+                    <div className="font-semibold text-indigo-800 mb-1">Constraints:</div>
+                    <div className="flex flex-col gap-1">
+                      {results.batchingStrategy.constraints.vramLimited && <span className="text-red-600 font-medium">⚠️ VRAM Limited</span>}
+                      {results.batchingStrategy.constraints.computeLimited && <span className="text-blue-600 font-medium">💻 Compute Limited</span>}
+                      {results.batchingStrategy.constraints.latencyLimited && <span className="text-amber-600 font-medium">⏱️ Latency Limited</span>}
+                    </div>
+                  </div>
+
+                  {/* Recommendations */}
+                  {results.batchingStrategy.recommendations.length > 0 && (
+                    <div className="mt-2 text-indigo-600 italic bg-white/50 p-2 rounded">
+                      <ul className="list-disc pl-3">
+                        {results.batchingStrategy.recommendations.map((rec, i) => <li key={i}>{rec}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="text-xs text-slate-400 mt-4 italic text-center">
+              <strong>{INFO_CONTENT.productionPlanning}</strong>
+            </div>
+
+          </div>
+        ) : calcMode === 'cpu' && results.cpuSizing ? (
+          <CpuResults cpuSizing={results.cpuSizing} />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+            <div className="text-4xl mb-4 opacity-50">📉</div>
+            <p className="text-sm font-medium">Configure parameters to see analysis</p>
           </div>
         )}
-
-        <div className="calc-info">
-          <strong>{INFO_CONTENT.productionPlanning}</strong>
-        </div>
       </div>
     </div>
   );

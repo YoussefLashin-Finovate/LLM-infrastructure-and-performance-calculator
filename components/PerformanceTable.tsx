@@ -1,6 +1,12 @@
 'use client';
 
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
+import { cn } from '@/lib/utils';
+import { calculatePerformance } from '@/lib/calculations';
+import { calculateModelSize } from '@/lib/calculationParameters';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { normalizeQuantType } from '@/lib/equations/quant';
+import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 interface PerformanceTableProps {
   quantization: QuantizationType;
@@ -9,166 +15,149 @@ interface PerformanceTableProps {
 }
 
 export default function PerformanceTable({ quantization, hardware, metric }: PerformanceTableProps) {
-  const modelCategories = [
-    {
-      models: ["Phi-3", "Gemma 2"],
-      arabicModels: [],
-      params: "3.8B-9B",
-      ttft: 38,
-      latency: 57,
-      users: 25,
-      batchSize: 180,
-      vram: 18,
-      context: 4096
-    },
-    {
-      models: ["Mistral 7B", "Llama 3.1 8B", "Qwen 2.5 7B", "Gemma 2 9B", "DeepSeek 7B"],
-      arabicModels: [],
-      params: "7B-9B",
-      ttft: 80,
-      latency: 120,
-      users: 12,
-      batchSize: 156,
-      vram: 16,
-      context: 4096
-    },
-    {
-      models: ["Jais 13B", "Llama 2 13B", "Llama 3.1 13B", "DeepSeek 14B"],
-      arabicModels: ["Jais 13B"],
-      params: "13B-14B",
-      ttft: 140,
-      latency: 210,
-      users: 7,
-      batchSize: 92,
-      vram: 28,
-      context: 4096
-    },
-    {
-      models: ["Gemma 2 27B", "Qwen 2.5 32B"],
-      arabicModels: [],
-      params: "27B-32B",
-      ttft: 300,
-      latency: 450,
-      users: 3,
-      batchSize: 39,
-      vram: 64,
-      context: 8192
-    },
-    {
-      models: ["CodeLlama 34B"],
-      arabicModels: [],
-      params: "34B",
-      ttft: 340,
-      latency: 510,
-      users: 3,
-      batchSize: 29,
-      vram: 68,
-      context: 8192
-    },
-    {
-      models: ["Mixtral 8x7B"],
-      arabicModels: [],
-      params: "46.7B MoE",
-      ttft: 467,
-      latency: 700,
-      users: 2,
-      batchSize: 18,
-      vram: 93,
-      context: 16384
-    },
-    {
-      models: ["Llama 3.1 70B", "Qwen 2.5 72B"],
-      arabicModels: [],
-      params: "70B-72B",
-      ttft: 700,
-      latency: 1050,
-      users: 1,
-      batchSize: 9,
-      vram: 140,
-      context: 16384
-    }
+  // Model categories with representative parameter sizes for calculations
+  const modelDefinitions = [
+    { models: ["Phi-3", "Gemma 2"], arabicModels: [], paramsLabel: "3.8B-9B", representativeParams: 3.8 },
+    { models: ["Mistral 7B", "Llama 3.1 8B", "Qwen 2.5 7B", "Gemma 2 9B", "DeepSeek 7B"], arabicModels: [], paramsLabel: "7B-9B", representativeParams: 7 },
+    { models: ["Jais 13B", "Llama 2 13B", "Llama 3.1 13B", "DeepSeek 14B"], arabicModels: ["Jais 13B"], paramsLabel: "13B-14B", representativeParams: 13 },
+    { models: ["Gemma 2 27B", "Qwen 2.5 32B"], arabicModels: [], paramsLabel: "27B-32B", representativeParams: 27 },
+    { models: ["CodeLlama 34B"], arabicModels: [], paramsLabel: "34B", representativeParams: 34 },
+    { models: ["Mixtral 8x7B"], arabicModels: [], paramsLabel: "46.7B MoE", representativeParams: 46.7 },
+    { models: ["Llama 3.1 70B", "Qwen 2.5 72B"], arabicModels: [], paramsLabel: "70B-72B", representativeParams: 70 }
   ];
 
-  return (
-    <div className="overflow-x-auto rounded-xl shadow-md mb-8">
-      <table className="w-full border-collapse text-[13px] bg-white">
-        <thead className="sticky top-0 z-10">
-          <tr>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-left font-semibold border-none text-[13px] uppercase tracking-wide first:rounded-tl-xl">
-              Models<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Available Options</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-left font-semibold border-none text-[13px] uppercase tracking-wide">
-              Parameters<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Size Range</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              TTFT<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(ms)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Latency<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(ms)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Users<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Concurrent</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              Batch<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Size</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide">
-              VRAM<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">(GB)</small>
-            </th>
-            <th className="bg-gradient-to-r from-blue-900 to-blue-600 text-white p-4 text-center font-semibold border-none text-[13px] uppercase tracking-wide last:rounded-tr-xl">
-              Context<br />
-              <small className="block font-normal text-[11px] opacity-90 mt-1 normal-case tracking-normal">Window</small>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {modelCategories.map((cat, idx) => {
-            const modelList = cat.models.map(model => {
-              if (cat.arabicModels.includes(model)) {
-                return `<span class="bg-gradient-to-r from-orange-200 to-orange-400 text-white px-2 py-0.5 rounded-md font-bold shadow-sm">${model}</span>`;
-              }
-              return model;
-            }).join(' • ');
+  // Compute live metrics using calculatePerformance and calculation helpers
+  const rows = (() => {
+    // Resolve hardware
+    const hwConfig = hardwareDatabase.find(hw => hw.value === hardware);
+    const hardwareOps = parseHardwareOpsFromValue(hwConfig?.value || '0');
 
-            return (
+    return modelDefinitions.map(def => {
+      const inputs = {
+        modelParams: def.representativeParams,
+        hardwareOps,
+        utilization: 0.35,
+        inputLength: 100,
+        responseLength: 200,
+        thinkTime: 5,
+        quantType: normalizeQuantType(quantization as string)
+      } as any;
+
+      const result = calculatePerformance(inputs);
+
+      // Compute values to display
+      const ttft = Math.round((inputs.inputLength / (result.realistic || 1)) * 1000);
+      const latency = Math.round(((inputs.inputLength + inputs.responseLength) / (result.realistic || 1)) * 1000);
+      const users = Math.max(1, Math.round(result.users));
+      const modelSizeGB = Math.round(calculateModelSize(def.representativeParams, quantization));
+      const availableMemory = (hwConfig?.memory || 96) - modelSizeGB;
+      const batchSize = Math.max(1, Math.floor(availableMemory / Math.max(1, Math.round(modelSizeGB * 0.1))));
+      const contextWindow = def.representativeParams < 20 ? 4096 : def.representativeParams < 50 ? 8192 : 16384;
+
+      return {
+        ...def,
+        ttft,
+        latency,
+        users,
+        batchSize,
+        vram: modelSizeGB,
+        context: contextWindow
+      };
+    });
+  })();
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm mb-8">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+            <tr>
+              <th className="p-4 w-1/3 min-w-[300px]">
+                Models
+                <div className="font-normal text-xs text-slate-500 mt-1">Available Options</div>
+              </th>
+              <th className="p-4 text-center">
+                Parameters
+                <div className="font-normal text-xs text-slate-500 mt-1">Size Range</div>
+              </th>
+              <th className="p-4 text-center">
+                TTFT
+                <div className="font-normal text-xs text-slate-500 mt-1">(ms)</div>
+              </th>
+              <th className="p-4 text-center">
+                Latency
+                <div className="font-normal text-xs text-slate-500 mt-1">(ms)</div>
+              </th>
+              <th className="p-4 text-center">
+                Users
+                <div className="font-normal text-xs text-slate-500 mt-1">Concurrent</div>
+              </th>
+              <th className="p-4 text-center">
+                Batch
+                <div className="font-normal text-xs text-slate-500 mt-1">Size</div>
+              </th>
+              <th className="p-4 text-center">
+                VRAM
+                <div className="font-normal text-xs text-slate-500 mt-1">(GB)</div>
+              </th>
+              <th className="p-4 text-center">
+                Context
+                <div className="font-normal text-xs text-slate-500 mt-1">Window</div>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((row, idx) => (
               <tr
                 key={idx}
-                className={`transition-all duration-200 ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50 hover:scale-[1.01] hover:shadow-md`}
+                className={cn(
+                  "hover:bg-slate-50/80 transition-colors",
+                  idx % 2 === 1 ? "bg-slate-50/30" : ""
+                )}
               >
-                <td className="p-3.5 border border-gray-200 leading-[1.8]" dangerouslySetInnerHTML={{ __html: modelList }} />
-                <td className="p-3.5 border border-gray-200">
-                  <strong>{cat.params}</strong>
+                <td className="p-4 align-top">
+                  <div className="flex flex-wrap gap-2">
+                    {row.models.map(model => (
+                      <span
+                        key={model}
+                        className={cn(
+                          "inline-flex items-center px-2 py-1 rounded text-xs font-medium border",
+                          row.arabicModels?.includes(model)
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : "bg-slate-100/50 text-slate-600 border-slate-200"
+                        )}
+                      >
+                        {model}
+                      </span>
+                    ))}
+                  </div>
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
-                  {cat.ttft}
+                <td className="p-4 text-center font-medium text-slate-700 align-middle">
+                  {row.paramsLabel}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
-                  {cat.latency}
+                <td className="p-4 text-center text-slate-600 align-middle">
+                  {row.ttft}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
-                  {cat.users}
+                <td className="p-4 text-center text-slate-600 align-middle">
+                  {row.latency}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center font-bold">
-                  {cat.batchSize}
+                <td className="p-4 text-center text-slate-600 align-middle">
+                  {row.users}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
-                  {cat.vram}
+                <td className="p-4 text-center font-semibold text-slate-900 align-middle">
+                  {row.batchSize}
                 </td>
-                <td className="p-3.5 border border-gray-200 text-center">
-                  {cat.context.toLocaleString()}
+                <td className="p-4 text-center text-slate-600 align-middle">
+                  {row.vram}
+                </td>
+                <td className="p-4 text-center text-slate-600 align-middle">
+                  {row.context.toLocaleString()}
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

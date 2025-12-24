@@ -313,13 +313,16 @@ export function calculateKVBytesPerTokenWithGQA(
   architecture: ModelArchitecture,
   bytesPerValue: number
 ): number {
-  // GQA optimization: only store KV for the KV heads, not all query heads
-  const gqaRatio = architecture.kvHeads / architecture.queryHeads;
-  
-  // 2 for K and V, multiply by layers, hidden size, bytes, and GQA ratio
-  const baseKVSize = 2 * architecture.layers * architecture.hiddenSize * bytesPerValue;
-  
-  return baseKVSize * gqaRatio;
+  // Explicit, robust KV formula using per-layer/head dimensions:
+  // KV per token = 2 × L × (kvHeads × head_dim) × bytes
+  // where head_dim = hiddenSize / queryHeads
+  const layers = architecture.layers;
+  const kvHeads = architecture.kvHeads || architecture.queryHeads || 1; // fallback to queryHeads if kvHeads missing
+  const queryHeads = architecture.queryHeads || architecture.kvHeads || 1;
+  const headDim = Math.round(architecture.hiddenSize / queryHeads);
+
+  const kvPerTokenBytes = 2 * layers * kvHeads * headDim * bytesPerValue;
+  return kvPerTokenBytes;
 }
 
 /**
@@ -419,3 +422,7 @@ export function getVRAMParameters(
   
   return sharedParams + (expertParams / numShards);
 }
+
+// Deprecated legacy file: re-export new modular implementation
+// The real implementations live under `lib/modelArchitectures/*`.
+export * from './modelArchitectures/index';

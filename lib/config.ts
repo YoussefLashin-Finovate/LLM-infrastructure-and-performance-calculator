@@ -145,7 +145,7 @@ export const CALCULATION_CONSTANTS = {
 // HARDWARE GROUPING CONFIGURATION
 // ============================================================================
 
-export const HARDWARE_FAMILIES = [
+export const HARDWARE_GPU_FAMILIES = [
   'NVIDIA B200 Blackwell',
   'NVIDIA B300 Blackwell Ultra',
   'NVIDIA H200',
@@ -155,13 +155,20 @@ export const HARDWARE_FAMILIES = [
   'NVIDIA A6000',
   'NVIDIA A5000',
   'AMD MI300X',
+  // Gaudi are accelerators (treated like GPUs here)
   'Intel Gaudi 3',
   'Intel Gaudi 2',
+];
+
+export const HARDWARE_CPU_FAMILIES = [
   'Intel Xeon 6 (6th Gen)',
   'Intel Xeon 5th Gen',
   'Intel Xeon 4th Gen',
   'Intel Xeon 3rd Gen',
 ];
+
+// Backwards-compatible single list (concatenation of GPU + CPU families)
+export const HARDWARE_FAMILIES = [...HARDWARE_GPU_FAMILIES, ...HARDWARE_CPU_FAMILIES];
 
 export function getHardwareFamily(hardwareName: string): string {
   const name = hardwareName.toLowerCase();

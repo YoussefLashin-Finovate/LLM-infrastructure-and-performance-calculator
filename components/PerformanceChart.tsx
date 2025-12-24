@@ -6,6 +6,8 @@ import { Bar } from 'react-chartjs-2';
 import { calculatePerformance } from '@/lib/calculations';
 import { calculateModelSize, quantEfficiency } from '@/lib/calculationParameters';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { normalizeQuantType } from '@/lib/equations/quant';
 import { QuantizationType, HardwareType, MetricType } from '@/lib/types';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
@@ -35,16 +37,7 @@ export default function PerformanceChart({ quantization, hardware, metric }: Per
     console.log('Found hardware config:', hwConfig);
 
     // Parse hardware ops (TFLOPS/POPS) - extract the numeric value
-    const opsString = hwConfig.value.split(',')[0].split('-').pop() || '0';
-    let hardwareOps = parseFloat(opsString);
-    
-    // Convert to FLOPS based on quantization type
-    // INT8/INT4 values are in TOPS/POPS, FP16/FP32 are in TFLOPS
-    if (quantization === 'int8' || quantization === 'int4' || quantization === 'q4_k_s') {
-      hardwareOps = hardwareOps * 1e12; // TOPS/POPS to OPS
-    } else {
-      hardwareOps = hardwareOps * 1e12; // TFLOPS to FLOPS
-    }
+    const hardwareOps = parseHardwareOpsFromValue(hwConfig.value);
 
     // Model sizes for different categories (using the same models as before)
     const modelSizes = [7, 13, 27, 34, 46.7, 70]; // Representative sizes for each category
@@ -59,13 +52,8 @@ export default function PerformanceChart({ quantization, hardware, metric }: Per
       let minVal: number, maxVal: number;
 
       // Use the same calculation logic as the main calculator
-      // Map quantization types to the ones supported by calculatePerformance
-      const quantTypeMap: Record<string, 'fp16' | 'int8' | 'int4'> = {
-        'fp16': 'fp16',
-        'int8': 'int8',
-        'q4_k_s': 'int4',
-        'int4': 'int4'
-      };
+      // Normalize quantization type to values supported by calculators
+      const normQuant = normalizeQuantType(quantization as string);
 
       const baseInputs = {
         modelParams: modelSize,
@@ -74,7 +62,7 @@ export default function PerformanceChart({ quantization, hardware, metric }: Per
         inputLength: 100,
         responseLength: 200,
         thinkTime: 5,
-        quantType: quantTypeMap[quantization] || 'int8'
+        quantType: normQuant
       };
 
       switch (metric) {

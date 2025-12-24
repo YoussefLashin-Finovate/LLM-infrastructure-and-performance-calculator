@@ -1,9 +1,31 @@
 import { useMemo } from 'react';
-import { calculateReverseInfrastructure } from '@/lib/calculations';
-import { calculateModelSize, isCPUHardware, cpuUtilizationFactor, gpuUtilizationFactor } from '@/lib/calculationParameters';
+import { calculateLlmInfrastructure } from '@/lib/calculations';
+import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { normalizeQuantType } from '@/lib/equations/quant';
+import { calculateModelSize, isCPUHardware, gpuUtilizationFactor } from '@/lib/calculationParameters';
+
+const CPU_UTILIZATION_DEFAULT = 0.25;
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
 
 interface UseCapacityCalculationProps {
+  // Production-grade framework
+  useProductionFramework?: boolean;
+  numUsers?: number;
+  tokensPerSecPerUser?: number;
+  peakFlops?: number;
+  vramPerGpu?: number;
+  kernelEfficiency?: number;
+  utilizationFactor?: number;
+  attentionOverhead?: number;
+  prefillOverhead?: number;
+  targetHeadroom?: number;
+  systemPromptTokensPG?: number;
+  sessionHistoryTokensPG?: number;
+  newInputTokensPerRequest?: number;
+  avgResponseTokensPerRequest?: number;
+  offloadRatio?: number;
+  
+  // Legacy fields
   model: string;
   hardware: string;
   quantization: string;
@@ -24,15 +46,34 @@ interface UseCapacityCalculationProps {
   customTotalExperts?: number;
   customActiveExperts?: number;
   // CPU overrides
-  cpuTps?: number;
   cpuPrefillMultiplier?: number;
   cpuUtilizationTarget?: number;
   cpuRedundancy?: number;
   cpuAMXEfficiency?: number;
   cpuModelRamOverhead?: number;
+  // Active KV session fraction (0..1)
+  activeKvFraction?: number;
 }
 
 export function useCapacityCalculation({
+  // Production-grade framework
+  useProductionFramework = false,
+  numUsers = 100,
+  tokensPerSecPerUser = 10,
+  peakFlops = 1e15,
+  vramPerGpu = 96,
+  kernelEfficiency = 0.5,
+  utilizationFactor = 0.8,
+  attentionOverhead = 0.1,
+  prefillOverhead = 0.1,
+  targetHeadroom = 0.1,
+  systemPromptTokensPG = 0,
+  sessionHistoryTokensPG = 0,
+  newInputTokensPerRequest = 100,
+  avgResponseTokensPerRequest = 50,
+  offloadRatio = 0,
+  
+  // Legacy fields
   model,
   hardware,
   quantization,
@@ -53,45 +94,43 @@ export function useCapacityCalculation({
   customTotalExperts = 8,
   customActiveExperts = 2,
   // CPU-specific overrides
-  cpuTps,
   cpuPrefillMultiplier,
   cpuUtilizationTarget,
   cpuRedundancy,
   cpuAMXEfficiency,
   cpuModelRamOverhead,
+  // Active KV session fraction
+  activeKvFraction = 0.05,
 }: UseCapacityCalculationProps) {
   return useMemo(() => {
     // Parse hardware ops (TFLOPS/POPS) - extract the numeric value correctly
-    const opsString = hardware.split(',')[0].split('-').pop() || '0';
-    let hardwareOpsPerUnit = parseFloat(opsString);
-    
-    // Convert to FLOPS based on quantization type
-    const quantType = quantization as 'fp16' | 'int8' | 'int4';
-    if (quantType === 'int8' || quantType === 'int4') {
-      hardwareOpsPerUnit = hardwareOpsPerUnit * 1e12; // TOPS/POPS to OPS
-    } else {
-      hardwareOpsPerUnit = hardwareOpsPerUnit * 1e12; // TFLOPS to FLOPS
-    }
+    let hardwareOpsPerUnit = parseHardwareOpsFromValue(hardware);
     
     // Use custom model params if custom model is enabled or if model='custom'
     const effectiveUseCustomModel = useCustomModel || model === 'custom';
     const modelParams = effectiveUseCustomModel ? customTotalParams : parseFloat(model);
+
+    // Normalize quantization type for downstream calculations
+    const quantType = normalizeQuantType(quantization as string);
     
-    // Build token breakdown if KV cache is enabled
-    const tokenBreakdown = useKVCache ? {
-      systemPromptTokens,
-      sessionHistoryTokens,
-      newInputTokens,
-      outputTokens: tokensPerSec
-    } : undefined;
+    // Build token breakdown later (computed after we know hardware) — will be created when useKVCache=true or automatically for CPU mode
+    let tokenBreakdown: { systemPromptTokens: number; sessionHistoryTokens: number; newInputTokens: number; outputTokens: number } | undefined = undefined;
     
     // Get GPU memory from hardware database
     const selectedHardware = hardwareDatabase.find(hw => hw.value === hardware);
     const vramPerUnit = selectedHardware?.memory || 0;
     const isCPU = selectedHardware?.type === 'cpu';
+
+    // Build token breakdown if KV cache is enabled OR if we're in CPU mode (CPUs use system RAM for KV by default)
+    tokenBreakdown = (useKVCache || isCPU) ? {
+      systemPromptTokens,
+      sessionHistoryTokens,
+      newInputTokens,
+      outputTokens: tokensPerSec
+    } : undefined; 
     
     // Apply CPU-specific utilization factor if using CPU
-    const effectiveUtilization = isCPU ? cpuUtilizationFactor : (utilization || gpuUtilizationFactor);
+    const effectiveUtilization = isCPU ? (cpuUtilizationTarget ?? CPU_UTILIZATION_DEFAULT) : (utilization || gpuUtilizationFactor);
     
     // Disable KV offloading for CPUs (they already use system RAM)
     const effectiveKvOffloading = isCPU ? false : kvOffloading;
@@ -106,34 +145,64 @@ export function useCapacityCalculation({
       }
     }
     
-    const results = calculateReverseInfrastructure({
-      modelParams,
-      users,
-      inputLength,
-      tokensPerUser: tokensPerSec,
-      hardwareOpsPerUnit,
-      utilization: effectiveUtilization,
-      quantType,
-      tokenBreakdown,
-      gpuMemoryGB: vramPerUnit,
-      // Forward CPU overrides when present
-      cpuTps,
-      cpuPrefillMultiplier,
-      cpuUtilizationTarget,
-      cpuRedundancy,
-      cpuAMXEfficiency,
-      cpuModelRamOverhead,
-      kvOffloading: effectiveKvOffloading,
-      kvOffloadingPercentage: effectiveKvOffloadingPercentage,
-      useMoeArchitecture,
-      useCustomModel: effectiveUseCustomModel,
-      customTotalParams,
-      customActiveParams,
-      customTotalExperts,
-      customActiveExperts,
-      isCPU,
-      cpuMemoryGB: isCPU ? vramPerUnit : undefined,
-    });
+    const results = calculateLlmInfrastructure(
+      (useProductionFramework && !isCPU) ? {
+        // Production-grade framework inputs
+        numUsers,
+        tokensPerSecPerUser,
+        modelParams,
+        quantizationLevel: quantType,
+        // Extract peak FLOPs and VRAM from selected hardware
+        peakFlops: parseHardwareOpsFromValue(hardware),
+        vramPerGpu: (() => {
+          const selectedHW = hardwareDatabase.find(h => h.value === hardware);
+          return selectedHW ? selectedHW.memory : 96; // Default to 96GB if not found
+        })(),
+        kernelEfficiency,
+        utilizationFactor,
+        attentionOverhead,
+        prefillOverhead,
+        targetHeadroom,
+        systemPromptTokens: systemPromptTokensPG,
+        sessionHistoryTokens: sessionHistoryTokensPG,
+        newInputTokensPerRequest,
+        avgResponseTokensPerRequest,
+        offloadRatio,
+        useCustomModel: effectiveUseCustomModel,
+        customTotalParams,
+        // Active KV fraction (for effective KV reporting)
+        activeKvFraction
+      } : {
+        // Legacy framework inputs
+        modelParams,
+        users,
+        inputLength,
+        tokensPerUser: tokensPerSec,
+        hardwareOpsPerUnit,
+        utilization: effectiveUtilization,
+        quantType,
+        tokenBreakdown,
+        gpuMemoryGB: vramPerUnit,
+        // Forward CPU overrides when present
+        cpuPrefillMultiplier,
+        cpuUtilizationTarget,
+        cpuRedundancy,
+        cpuAMXEfficiency,
+        cpuModelRamOverhead,
+        kvOffloading: effectiveKvOffloading,
+        kvOffloadingPercentage: effectiveKvOffloadingPercentage,
+        useMoeArchitecture,
+        useCustomModel: effectiveUseCustomModel,
+        customTotalParams,
+        customActiveParams,
+        customTotalExperts,
+        customActiveExperts,
+        isCPU,
+        cpuMemoryGB: isCPU ? vramPerUnit : undefined,
+        // Active KV fraction forwarded
+        activeKvFraction
+      }
+    );
     
     // Calculate accumulated VRAM and FLOPS
     const totalVRAM = vramPerUnit * results.unitsNeeded;
@@ -147,5 +216,14 @@ export function useCapacityCalculation({
       modelSize,
       vramPerUnit,
     };
-  }, [model, hardware, users, inputLength, tokensPerSec, utilization, quantization, useKVCache, systemPromptTokens, sessionHistoryTokens, newInputTokens, kvOffloading, kvOffloadingPercentage, useMoeArchitecture, useCustomModel, customTotalParams, customActiveParams, customTotalExperts, customActiveExperts]);
+  }, [
+    // Production-grade dependencies
+    useProductionFramework, numUsers, tokensPerSecPerUser, peakFlops, vramPerGpu, kernelEfficiency, utilizationFactor, attentionOverhead, prefillOverhead, targetHeadroom, systemPromptTokensPG, sessionHistoryTokensPG, newInputTokensPerRequest, avgResponseTokensPerRequest, offloadRatio,
+    // Legacy dependencies
+    model, hardware, users, inputLength, tokensPerSec, utilization, quantization, useKVCache, systemPromptTokens, sessionHistoryTokens, newInputTokens, kvOffloading, kvOffloadingPercentage, useMoeArchitecture, useCustomModel, customTotalParams, customActiveParams, customTotalExperts, customActiveExperts,
+    // CPU overrides
+    cpuPrefillMultiplier, cpuUtilizationTarget, cpuRedundancy, cpuAMXEfficiency, cpuModelRamOverhead,
+    // Active KV fraction (ensure recalculation when user toggles it)
+    activeKvFraction
+  ]);
 }
