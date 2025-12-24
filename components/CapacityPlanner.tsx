@@ -15,6 +15,7 @@ import QuantizationSelect from '@/components/QuantizationSelect';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
 import { GpuSelector, CpuSelector, TokenConfiguration } from '@/components/shared';
 import CpuResults from '@/components/capacity/CpuResults';
+import { generateInfrastructureReport, ReportData, ReportSection } from '@/lib/pdfReporter';
 
 // Safe number formatter - prevents NaN from being rendered
 function safeNum(value: number | undefined, decimals: number = 1): string {
@@ -39,387 +40,95 @@ function getMemoryLabel(hardwareValue: string): string {
 
 async function exportToPDF(inputs: any, results: any) {
   try {
-    const jsPDF = (await import('jspdf')).default;
+    const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
+    const hardwareLabel = selectedHW?.name || inputs.hardware;
 
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    let yPos = 20;
-    const leftMargin = 20;
-    const rightMargin = 190;
-    const lineHeight = 7;
-    const pageHeight = 280; // Leave room for footer
-
-    // Function to check if we need a new page
-    const checkPageBreak = () => {
-      if (yPos > pageHeight - 20) {
-        pdf.addPage();
-        yPos = 20;
-        // Re-add header on new page
-        pdf.setFillColor(16, 185, 129);
-        pdf.rect(0, 0, 210, 40, 'F');
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(24);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text('LLM Infrastructure Report', leftMargin, 20);
-        pdf.setFontSize(12);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text('Capacity Planning Analysis (continued)', leftMargin, 30);
-        pdf.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), leftMargin, 36);
-        yPos = 55;
-        pdf.setTextColor(0, 0, 0);
+    const sections: ReportSection[] = [
+      {
+        title: 'Workload Requirements',
+        items: [
+          ['Target Users', (inputs.numUsers || inputs.users || 0).toString()],
+          ['Tokens/sec per User', (inputs.tokensPerSecPerUser || inputs.tokensPerSec || 0).toString()],
+          ['Quantization Level', (inputs.quantization || 'N/A').toUpperCase()],
+          ['Offload Ratio', `${((inputs.offloadRatio || 0) * 100).toFixed(0)}%`],
+        ]
+      },
+      {
+        title: 'Model Configuration',
+        items: [
+          ['Architecture', inputs.useMoeArchitecture ? 'Mixture of Experts (MoE)' : 'Dense'],
+          ['Total Parameters', inputs.useCustomModelReverse ? `${inputs.customTotalParamsReverse}B` : `${parseFloat(inputs.model) || 7}B`],
+          ['Active Parameters', inputs.useCustomModelReverse ? `${inputs.customActiveParamsReverse}B` : `${parseFloat(inputs.model) || 7}B`],
+          ['Quantization', (inputs.quantization || 'N/A').toUpperCase()],
+        ]
+      },
+      {
+        title: 'Hardware Specification',
+        items: [
+          ['Device Type', inputs.calcMode?.toUpperCase() || 'GPU'],
+          ['Hardware Model', hardwareLabel],
+          ['VRAM/RAM per Unit', `${selectedHW?.memory || 'N/A'} GB`],
+          ['Peak Performance', selectedHW ? formatFLOPS(parseHardwareOpsFromValue(selectedHW.value)) : 'N/A'],
+        ]
       }
+    ];
+
+    const resultsSection: ReportSection = {
+      title: 'Infrastructure Sizing Results',
+      items: [
+        ['Units Needed', results.unitsNeeded?.toString() || '0'],
+        ['Total Throughput', `${(results.totalSystemThroughput || 0).toFixed(1)} tokens/sec`],
+        ['Throughput per Unit', `${(results.throughputPerUnit || 0).toFixed(1)} tokens/sec`],
+        ['Available Headroom', `${(results.headroom || 0).toFixed(0)}%`],
+      ]
     };
 
-    const memoryLabel = getMemoryLabel(inputs.hardware);
-
-    // Header with Logo
-    pdf.setFillColor(16, 185, 129);
-    pdf.rect(0, 0, 210, 40, 'F');
-
-    // Add logo
-    try {
-      const logoResponse = await fetch('/finovate-logo.png');
-      if (logoResponse.ok) {
-        const logoBlob = await logoResponse.blob();
-        const logoData = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.readAsDataURL(logoBlob);
-        });
-
-        // Get image dimensions to maintain aspect ratio
-        const img = new Image();
-        img.src = logoData as string;
-        await new Promise((resolve) => {
-          img.onload = resolve;
-        });
-
-        const aspectRatio = img.width / img.height;
-        const logoHeight = 25; // Fixed height in mm
-        const logoWidth = logoHeight * aspectRatio;
-
-        // Add logo to the right side of header, maintaining aspect ratio
-        pdf.addImage(logoData as string, 'PNG', 210 - logoWidth - 10, 7.5, logoWidth, logoHeight);
+    const calculations: ReportSection[] = [
+      {
+        title: 'Memory & Compute Breakdown',
+        items: [
+          ['Model Weights', `${(results.modelSize || 0).toFixed(1)} GB`],
+          ['KV Cache per Unit', `${(results.kvVramPerGpu || results.vramAllocation?.kvCacheGB || 0).toFixed(2)} GB`],
+          ['Required VRAM/RAM', `${(results.requiredVramPerGpu || results.vramAllocation?.totalUsedGB || 0).toFixed(1)} GB`],
+          ['---', '---'],
+          ['Compute per Token', results.flopsPerToken ? formatFLOPS(results.flopsPerToken) : 'N/A'],
+          ['Total Required Compute', results.requiredFLOPS ? formatFLOPS(results.requiredFLOPS) : 'N/A'],
+          ['Total Available Compute', results.availableFLOPS ? formatFLOPS(results.availableFLOPS) : 'N/A'],
+        ]
       }
-    } catch (logoError) {
-      console.warn('Could not load logo for PDF:', logoError);
+    ];
+
+    // Add CPU specific details if in CPU mode
+    if (inputs.calcMode === 'cpu' && results.cpuSizing) {
+      calculations.push({
+        title: 'CPU Inner Assumptions',
+        items: [
+          ['Prefill Multiplier (M)', inputs.cpuPrefillMultiplier?.toString() || '0.5'],
+          ['Utilization Target (U)', `${((inputs.cpuUtilizationTarget || 0) * 100).toFixed(0)}%`],
+          ['Redundancy Factor', `${((inputs.cpuRedundancy || 0) * 100).toFixed(0)}%`],
+          ['AMX Efficiency', `${((inputs.cpuAMXEfficiency || 0) * 100).toFixed(0)}%`],
+        ]
+      });
     }
 
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(24);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('LLM Infrastructure Report', leftMargin, 20);
-    pdf.setFontSize(12);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text(inputs.calcMode === 'cpu' ? 'CPU Capacity Planning Analysis' : 'GPU Capacity Planning Analysis', leftMargin, 30);
-    pdf.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), leftMargin, 36);
+    const reportData: ReportData = {
+      reportType: 'Capacity Planning',
+      modelName: inputs.useCustomModelReverse ? 'Custom Architecture' : `${parseFloat(inputs.model) || 7}B Model`,
+      hardwareName: hardwareLabel,
+      date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      preparedFor: 'System Architecture Team',
+      sections: [...sections, resultsSection],
+      calculations: calculations,
+      summary: `To support ${inputs.numUsers || inputs.users} concurrent users with a target of ${inputs.tokensPerSecPerUser || inputs.tokensPerSec} tokens/sec each, this infrastructure design requires ${results.unitsNeeded} units of ${hardwareLabel}. The system provides ${(results.totalSystemThroughput || 0).toFixed(1)} aggregate tokens/sec with ${(results.headroom || 0).toFixed(0)}% operational headroom.`
+    };
 
-    yPos = 55;
-    pdf.setTextColor(0, 0, 0);
-
-    // Section: Your Inputs
-    pdf.setFillColor(59, 130, 246);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('INPUT PARAMETERS', leftMargin, yPos);
-    yPos += 12;
-
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-
-    // Calculate effective model params
-    const effectiveModelParams = inputs.model === 'custom' ? inputs.customTotalParamsReverse : parseFloat(inputs.model);
-
-    // Get hardware info for proper display
-    const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
-    const hardwareName = selectedHW?.name || inputs.hardware.split('|')[0];
-
-    if (inputs.calcMode === 'cpu') {
-      // CPU Mode Inputs
-      const cpuInputsData = [
-        ['Calculation Mode:', 'CPU Mode'],
-        ['Number of Users:', inputs.users?.toString() || 'N/A'],
-        ['Tokens/sec per User:', inputs.tokensPerSec?.toString() || 'N/A'],
-        ['Model Parameters (Billions):', effectiveModelParams?.toString() || 'N/A'],
-        ['Quantization Level:', inputs.quantization?.toUpperCase() || 'N/A'],
-        ['CPU Hardware:', hardwareName],
-        ['Computed TPS per CPU:', (results.cpuSizing && results.cpuSizing.targetTPSPerCPU) ? results.cpuSizing.targetTPSPerCPU.toFixed(6) : 'N/A'],
-        ['Prefill Multiplier:', inputs.cpuPrefillMultiplier?.toString() || 'N/A'],
-        ['Utilization Target (%):', inputs.cpuUtilizationTarget ? (inputs.cpuUtilizationTarget * 100).toFixed(0) : 'N/A'],
-        ['Redundancy Factor (%):', inputs.cpuRedundancy ? (inputs.cpuRedundancy * 100).toFixed(0) : 'N/A'],
-        ['AMX Efficiency (%):', inputs.cpuAMXEfficiency ? (inputs.cpuAMXEfficiency * 100).toFixed(0) : 'N/A'],
-        ['Model RAM Overhead (%):', inputs.cpuModelRamOverhead ? (inputs.cpuModelRamOverhead * 100).toFixed(0) : 'N/A'],
-        ['System Prompt Tokens:', inputs.systemPromptTokens?.toString() || 'N/A'],
-        ['Session History Tokens:', inputs.sessionHistoryTokens?.toString() || 'N/A'],
-        ['New Input Tokens (per req):', inputs.newInputTokens?.toString() || 'N/A'],
-        ['Active KV Users (%):', inputs.activeKvFraction ? (inputs.activeKvFraction * 100).toFixed(1) : (100).toString()]
-      ];
-
-      cpuInputsData.forEach(([label, value]) => {
-        pdf.text(`${label} ${value}`, leftMargin, yPos);
-        yPos += lineHeight;
-        checkPageBreak();
-      });
-
-      yPos += 5;
-
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(14);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('CPU SIZING RESULTS', leftMargin, yPos);
-      yPos += 12;
-
-      pdf.setTextColor(0, 0, 0);
-      pdf.setFontSize(11);
-      pdf.setFont('helvetica', 'normal');
-
-      if (results.cpuSizing) {
-        const activeKvPercent = (results.cpuSizing && results.cpuSizing.kvTotalGB && results.cpuSizing.kvTotalGB > 0)
-          ? ((Number(results.cpuSizing.kvActiveGB || 0) / Number(results.cpuSizing.kvTotalGB || 1)) * 100)
-          : (inputs.activeKvFraction ? (inputs.activeKvFraction * 100) : undefined);
-
-        const cpuResultsData = [
-          ['Model RAM Required:', `${results.cpuSizing.modelRamGB?.toFixed(1) || 'N/A'} GB`],
-          ['KV Cache (worst-case, total):', `${results.cpuSizing.kvTotalGB?.toFixed(2) || '0.00'} GB`],
-          ['Effective KV (active):', `${results.cpuSizing.kvActiveGB?.toFixed(2) || '0.00'} GB`],
-          ['Effective KV (% active):', `${activeKvPercent !== undefined ? activeKvPercent.toFixed(1) + '%' : 'N/A'}`],
-          ['KV Offloaded To:', 'System RAM (100%)'],
-          ['Total Memory (Model + Effective KV):', `${results.cpuSizing.totalMemoryGB?.toFixed(2) || 'N/A'} GB`],
-          ['Memory Per CPU:', `${results.cpuSizing.memoryPerCPU?.toFixed(2) || 'N/A'} GB`],
-          ['FLOPs per Token:', formatFLOPS(results.cpuSizing.flopsPerTokenGFLOPS * 1e9)],
-          ['Total FLOPs:', formatFLOPS(results.cpuSizing.totalFlopsTFLOPS * 1e12)],
-          ['Computed TPS / CPU:', results.cpuSizing.targetTPSPerCPU?.toFixed(6) || 'N/A'],
-          ['Compute CPUs (formula):', results.cpuSizing.cpusCompute?.toString() || 'N/A'],
-          ['Decode CPUs (empirical):', results.cpuSizing.cpusDecode?.toString() || 'N/A'],
-          ['Prefill CPUs:', results.cpuSizing.cpusWithPrefill?.toString() || 'N/A'],
-          // Removed 'Utilization CPUs' and 'Redundancy CPUs' fields to avoid double-counting and dimensional confusion; redundancy is applied multiplicatively in the CPU sizing algorithm.
-          ['Final CPUs:', results.cpuSizing.finalCPUsRounded?.toString() || 'N/A'],
-          ['Delivered TPS:', results.cpuSizing.deliveredTPS?.toFixed(1) || 'N/A'],
-        ];
-
-        cpuResultsData.forEach(([label, value]) => {
-          pdf.text(`${label} ${value}`, leftMargin, yPos);
-          yPos += lineHeight;
-          checkPageBreak();
-        });
-      }
-
-    } else {
-      // GPU Mode (Production-Grade) Inputs
-
-      let inputData: [string, string][];
-
-      if (inputs.useProductionFramework) {
-        // Production-grade framework inputs
-        inputData = [
-          ['Framework:', 'Production-Grade'],
-          ['Model Size:', `${effectiveModelParams.toFixed(1)}B parameters`],
-          ['Quantization Type:', inputs.quantization.toUpperCase()],
-          ['Hardware:', hardwareName],
-          ['Number of Users:', inputs.numUsers?.toString() || 'N/A'],
-          ['Tokens/sec per User:', inputs.tokensPerSecPerUser?.toString() || 'N/A'],
-          ['Peak FLOPs:', formatFLOPS(inputs.peakFlops || 0)],
-          ['VRAM per GPU:', `${inputs.vramPerGpu || 0} GB`],
-          ['Kernel Efficiency:', `${((inputs.kernelEfficiency || 0) * 100).toFixed(0)} %`],
-          ['Utilization Factor:', `${((inputs.utilizationFactor || 0) * 100).toFixed(0)} %`],
-          ['Attention Overhead:', `${((inputs.attentionOverhead || 0) * 100).toFixed(0)} %`],
-          ['Prefill Overhead:', `${((inputs.prefillOverhead || 0) * 100).toFixed(0)} %`],
-          ['Target Headroom:', `${((inputs.targetHeadroom || 0) * 100).toFixed(0)} %`],
-        ];
-
-        if (inputs.systemPromptTokensPG) {
-          inputData.push(['System Prompt Tokens:', inputs.systemPromptTokensPG.toString()]);
-        }
-        if (inputs.sessionHistoryTokensPG) {
-          inputData.push(['Session History Tokens:', inputs.sessionHistoryTokensPG.toString()]);
-        }
-        if (inputs.newInputTokens) {
-          inputData.push(['New Input Tokens per Request:', inputs.newInputTokens.toString()]);
-        }
-        if (inputs.offloadRatio && inputs.offloadRatio > 0) {
-          inputData.push(['KV Cache Offload Ratio:', `${(inputs.offloadRatio * 100).toFixed(0)} %`]);
-        }
-      } else {
-        // Legacy framework inputs
-        inputData = [
-          ['Framework:', 'Legacy'],
-          ['Model Size:', `${effectiveModelParams.toFixed(1)}B parameters`],
-          ['Quantization Type:', inputs.quantization.toUpperCase()],
-          ['Hardware:', hardwareName],
-          ['Utilization:', `${(inputs.utilization * 100).toFixed(0)} %`],
-          ['Number of Users:', inputs.users.toString()],
-          ['Tokens/sec per User:', inputs.tokensPerSec.toString()],
-        ];
-
-        if (inputs.useKVCache) {
-          inputData.push(
-            ['System Tokens:', `${inputs.systemPromptTokens} (cached)`],
-            ['History Tokens:', `${inputs.sessionHistoryTokens} (cached)`],
-            ['Input Tokens:', `${inputs.newInputTokens} (per request)`]
-          );
-        } else {
-          inputData.push(['Output Length:', `${inputs.inputLength} tokens`]);
-        }
-      }
-
-      inputData.forEach(([label, value]) => {
-        checkPageBreak();
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(label, leftMargin, yPos);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(value, leftMargin + 80, yPos);
-        yPos += lineHeight;
-      });
-
-      yPos += 5;
-
-      // Section: Computed Results
-      pdf.setFillColor(16, 185, 129);
-      pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(14);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('COMPUTED RESULTS', leftMargin, yPos);
-      yPos += 12;
-
-      pdf.setTextColor(0, 0, 0);
-      pdf.setFontSize(11);
-      pdf.setFont('helvetica', 'normal');
-
-      // Use computed values from results instead of manual calculations
-      const totalTokensPerSec = results.totalSystemThroughput || 0;
-      const totalFlopsPerSec = results.requiredFLOPS || 0;
-
-      // Calculate actual FLOP multiplier based on model size
-      const flopsMultiplier = calculateFlopsMultiplier(effectiveModelParams);
-
-      // Breakdown (if available)
-      const decodePF = results.decodeFlopsPFLOPS || 0;
-      const prefillPF = results.prefillFlopsPFLOPS || 0;
-      const totalPF = results.totalWorkloadPFLOPS || (decodePF + prefillPF);
-
-      const resultsData = [
-        ['FLOPs per Parameter per Token:', `${flopsMultiplier.toFixed(1)}× (inference)`],
-        ['Required FLOPs/sec (workload only - model/algorithm overheads):', formatFLOPS(totalFlopsPerSec)],
-        ['  • Decode FLOPs/sec:', `${formatFLOPS(decodePF * 1e15)} (${(decodePF / Math.max(1, totalPF) * 100).toFixed(1)}%)`],
-        ['  • Prefill FLOPs/sec:', `${formatFLOPS(prefillPF * 1e15)} (${(prefillPF / Math.max(1, totalPF) * 100).toFixed(1)}%)`],
-        ['Total Tokens/sec:', totalTokensPerSec.toFixed(1)],
-        ['Available System FLOPs/sec (capacity):', formatFLOPS(results.totalFLOPS || 0)],
-        ['', ''],
-        ['Hardware Units Needed:', results.unitsNeeded.toString()],
-        ['Total System Throughput:', `${results.totalSystemThroughput.toFixed(1)} tokens/sec`],
-        ['Throughput per Unit:', `${results.throughputPerUnit.toFixed(1)} tokens/sec`],
-        ['System Headroom:', `${results.headroom.toFixed(0)} %`],
-        [`Total ${memoryLabel}:`, `${results.totalVRAM.toFixed(0)} GB`],
-        [`${memoryLabel} per Unit:`, `${results.vramPerUnit} GB`],
-        ['Model Size:', `${results.modelSize.toFixed(1)} GB`],
-      ];
-
-      if (results.vramAllocation && results.vramAllocation.kvCacheGB > 0) {
-        resultsData.push(['KV Cache Memory:', `${results.vramAllocation.kvCacheGB.toFixed(2)} GB`]);
-        resultsData.push([`Total ${memoryLabel} per Unit:`, `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
-      }
-
-      // Add detailed KV cache and data information
-      if (results.kvCache) {
-        resultsData.push(['', '']);
-        resultsData.push(['=== KV CACHE DETAILS ===', '']);
-        resultsData.push(['Total Session Tokens:', results.kvCache.totalSessionTokens.toString()]);
-        resultsData.push(['KV Memory per Session:', `${results.kvCache.kvMemoryGB.toFixed(3)} GB`]);
-        resultsData.push(['Max Sessions per GPU:', results.kvCache.maxSessionsPerGPU === Infinity ? 'Unlimited (with offloading)' : results.kvCache.maxSessionsPerGPU.toString()]);
-        resultsData.push(['KV Cache Utilization:', `${results.kvCache.kvUtilizationPercent.toFixed(1)} %`]);
-      }
-
-      if (results.vramAllocation) {
-        resultsData.push(['', '']);
-        resultsData.push(['=== VRAM ALLOCATION ===', '']);
-        resultsData.push(['Model Weights:', `${results.vramAllocation.modelWeightsGB.toFixed(1)} GB`]);
-        resultsData.push(['KV Cache (per user):', `${results.vramAllocation.kvCacheGB.toFixed(3)} GB`]);
-        resultsData.push(['Safety Buffer:', `${results.vramAllocation.safetyBufferGB.toFixed(1)} GB`]);
-        resultsData.push(['Total Used VRAM:', `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
-        resultsData.push(['Available VRAM:', `${results.vramAllocation.availableGB.toFixed(1)} GB`]);
-        resultsData.push(['VRAM Fit Status:', results.vramAllocation.canFitModel ? '✅ Fits' : '❌ Insufficient']);
-      }
-
-      if (results.vramAllocation && results.vramAllocation.offloadedMemoryGB !== undefined && results.vramAllocation.offloadedMemoryGB > 0) {
-        const offloadedMem = results.vramAllocation.offloadedMemoryGB >= 1000
-          ? `${(results.vramAllocation.offloadedMemoryGB / 1000).toFixed(2)} TB`
-          : `${results.vramAllocation.offloadedMemoryGB.toFixed(1)} GB`;
-        resultsData.push(['CPU/NVMe Memory (KV Offloading):', offloadedMem]);
-      }
-
-      // Add total system data
-      resultsData.push(['', '']);
-      resultsData.push(['=== TOTAL SYSTEM DATA ===', '']);
-      resultsData.push(['Total GPUs Required:', results.unitsNeeded.toString()]);
-      resultsData.push(['Total System VRAM:', `${results.totalVRAM.toFixed(0)} GB`]);
-      resultsData.push(['Total System FLOPs:', formatFLOPS(results.totalFLOPS || 0)]);
-      resultsData.push(['Total System Throughput:', `${results.totalSystemThroughput.toFixed(1)} tokens/sec`]);
-      resultsData.push(['System Efficiency:', `${((results.totalSystemThroughput / (results.totalFLOPS || 1)) * 1e12).toFixed(2)} tokens/sec per TFLOPS`]);
-
-      resultsData.push(
-        ['Total Overhead:', `${results.totalOverheadPercent.toFixed(0)} %`],
-      );
-
-      resultsData.forEach(([label, value]) => {
-        if (label === '') {
-          yPos += 3;
-          return;
-        }
-        checkPageBreak();
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(label, leftMargin, yPos);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(value, leftMargin + 90, yPos);
-        yPos += lineHeight;
-      });
-
-      yPos += 5;
-
-      // Section: Overhead Breakdown
-      if (results.overheadBreakdown && results.overheadBreakdown.length > 0) {
-        checkPageBreak();
-        pdf.setFillColor(100, 116, 139);
-        pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(14);
-        pdf.setFont('helvetica', 'bold');
-        pdf.text('OVERHEAD BREAKDOWN', leftMargin, yPos);
-        yPos += 12;
-
-        pdf.setTextColor(0, 0, 0);
-        pdf.setFontSize(11);
-        pdf.setFont('helvetica', 'normal');
-
-        results.overheadBreakdown.forEach((overhead: string) => {
-          checkPageBreak();
-          pdf.text(`• ${overhead}`, leftMargin + 5, yPos);
-          yPos += lineHeight;
-        });
-      }
-
-    } // End of GPU else block
-
-    // Footer
-    pdf.setFontSize(9);
-    pdf.setTextColor(100, 116, 139);
-    pdf.text('Generated by LLM Infrastructure Calculator', leftMargin, 275);
-    pdf.text(`Report ID: CAP-${Date.now()}`, leftMargin, 280);
-    pdf.text('© 2025 Finovate Team. All rights reserved.', leftMargin, 285);
-
-    pdf.save(`Infrastructure-Capacity-Report-${Date.now()}.pdf`);
+    await generateInfrastructureReport(reportData);
   } catch (error) {
     console.error('Error generating PDF:', error);
-    alert('Failed to generate PDF. Please try again.');
+    alert('Failed to generate PDF report.');
   }
 }
+
 
 interface CapacityPlannerProps {
   // Production-Grade Framework Mode

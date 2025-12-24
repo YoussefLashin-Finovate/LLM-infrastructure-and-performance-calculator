@@ -1,7 +1,10 @@
 'use client';
 import { hardwareDatabase } from '@/lib/hardwareDatabase';
+import { GpuSelector, CpuSelector, TokenConfiguration } from '@/components/shared';
+import { generateInfrastructureReport, ReportData, ReportSection } from '@/lib/pdfReporter';
 import { calculateModelSize } from '@/lib/calculationParameters';
 import { parseHardwareOpsFromValue } from '@/lib/equations/hardware';
+import { formatFLOPS } from '@/lib/equations/format';
 import {
   MODEL_OPTIONS,
   QUANTIZATION_OPTIONS,
@@ -12,7 +15,6 @@ import {
 } from '@/lib/config';
 import { useHardwareGroups } from '@/hooks/useHardwareFilter';
 import QuantizationSelect from '@/components/QuantizationSelect';
-import { GpuSelector, CpuSelector, TokenConfiguration } from '@/components/shared';
 
 // Get hardware type from hardware value string
 function getHardwareType(hardwareValue: string): 'gpu' | 'cpu' {
@@ -25,204 +27,96 @@ function getMemoryLabel(hardwareValue: string): string {
   return getHardwareType(hardwareValue) === 'cpu' ? 'System RAM' : 'VRAM';
 }
 
-// Format FLOPS to readable units
-function formatFLOPS(flops: number): string {
-  if (flops >= 1e15) {
-    return `${(flops / 1e15).toFixed(2)} PFLOPS`;
-  } else if (flops >= 1e12) {
-    return `${(flops / 1e12).toFixed(2)} TFLOPS`;
-  } else if (flops >= 1e9) {
-    return `${(flops / 1e9).toFixed(2)} GFLOPS`;
-  } else {
-    return `${flops.toFixed(2)} FLOPS`;
-  }
-}
+
 
 // Export calculation results as professional PDF for client tenders
 async function exportToPDF(inputs: any, results: any) {
   try {
-    const jsPDF = (await import('jspdf')).default;
+    const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
+    const hardwareLabel = selectedHW?.name || inputs.hardware;
 
     // Calculate model size based on inputs
     const effectiveModelParams = parseFloat(inputs.model) || 7;
     const modelSizeGB = calculateModelSize(effectiveModelParams, inputs.quantization);
 
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    let yPos = 20;
-    const leftMargin = 20;
-    const rightMargin = 190;
-    const lineHeight = 7;
-
-    // Header
-    pdf.setFillColor(16, 185, 129);
-    pdf.rect(0, 0, 210, 40, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(24);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('LLM Infrastructure Report', leftMargin, 20);
-    pdf.setFontSize(12);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text('Performance Analysis', leftMargin, 30);
-    pdf.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), leftMargin, 36);
-
-    yPos = 55;
-    pdf.setTextColor(0, 0, 0);
-
-    // Section: Configuration
-    pdf.setFillColor(59, 130, 246);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('CONFIGURATION', leftMargin, yPos);
-    yPos += 12;
-
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-
-    const selectedHW = hardwareDatabase.find(hw => hw.value === inputs.hardware);
-    const memoryLabel = selectedHW ? getMemoryLabel(selectedHW.value) : 'VRAM';
-
-    const configData = [
-      ['Model Size:', `${parseFloat(inputs.model).toFixed(1)}B parameters`],
-      ['Quantization:', inputs.quantization.toUpperCase()],
-      ['Hardware:', selectedHW?.name || 'N/A'],
-      [`Hardware ${memoryLabel}:`, `${selectedHW?.memory || 'N/A'} GB`],
-      ['Hardware FLOPS:', formatFLOPS(parseFloat(inputs.hardware.split(',')[0]) * 1e12)],
-      ['Utilization Factor:', `${(inputs.utilization * 100).toFixed(0)}%`],
-      ['Input Length:', `${inputs.inputLength} tokens`],
-      ['Response Length:', `${inputs.responseLength} tokens`],
-      ['Think Time:', `${inputs.thinkTime}s`],
+    const sections: ReportSection[] = [
+      {
+        title: 'Workload Configuration',
+        items: [
+          ['Model Scale', `${effectiveModelParams.toFixed(1)}B parameters`],
+          ['Quantization', inputs.quantization.toUpperCase()],
+          ['Input Sequence', `${inputs.inputLength} tokens`],
+          ['Response Length', `${inputs.responseLength} tokens`],
+          ['Think Time', `${inputs.thinkTime}s`],
+        ]
+      },
+      {
+        title: 'Infrastructure Specification',
+        items: [
+          ['Hardware Unit', hardwareLabel],
+          ['VRAM/RAM per Unit', `${selectedHW?.memory || 'N/A'} GB`],
+          ['Peak Performance', formatFLOPS(parseHardwareOpsFromValue(inputs.hardware))],
+          ['Total Units', (inputs.units || 1).toString()],
+          ['Utilization Target', `${(inputs.utilization * 100).toFixed(0)}%`],
+        ]
+      }
     ];
 
     if (inputs.useKVCache) {
-      configData.push(
-        ['System Tokens:', `${inputs.systemPromptTokens} (cached)`],
-        ['History Tokens:', `${inputs.sessionHistoryTokens} (cached)`],
-        ['Input Tokens:', `${inputs.newInputTokens} (per request)`]
-      );
+      sections.push({
+        title: 'Token & Cache Parameters',
+        items: [
+          ['System Prompt', `${inputs.systemPromptTokens} (cached)`],
+          ['Session History', `${inputs.sessionHistoryTokens} (cached)`],
+          ['New Input', `${inputs.newInputTokens} (per request)`],
+          ['Offload Ratio', `${((inputs.offloadRatio || 0) * 100).toFixed(0)}%`],
+        ]
+      });
     }
 
-    configData.forEach(([label, value]) => {
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(label, leftMargin, yPos);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(value, leftMargin + 60, yPos);
-      yPos += lineHeight;
-    });
+    const performanceSection: ReportSection = {
+      title: 'Performance Analysis Results',
+      items: [
+        ['Max System Throughput', results.maxThroughput ? `${results.maxThroughput.toFixed(1)} tokens/sec` : 'N/A'],
+        ['Throughput per Unit', results.throughputPerGpu ? `${results.throughputPerGpu.toFixed(1)} tokens/sec` : 'N/A'],
+        ['Tokens/sec per User', results.tokensPerSecPerUser ? results.tokensPerSecPerUser.toFixed(1) : 'N/A'],
+        ['Max Concurrent Users', results.maxUsers ? results.maxUsers.toFixed(1) : 'N/A'],
+        ['Batch Serving Efficiency', results.batchEfficiency ? `${(results.batchEfficiency * 100).toFixed(1)}%` : 'N/A'],
+        ['Prefill Latency Impact', results.prefillEfficiency ? `${((1 - results.prefillEfficiency) * 100).toFixed(1)}%` : 'N/A'],
+      ]
+    };
 
-    yPos += 5;
-
-    // Section: Performance Results
-    pdf.setFillColor(16, 185, 129);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('PERFORMANCE METRICS', leftMargin, yPos);
-    yPos += 12;
-
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-
-    const metricsData = [
-      ['Usable FLOPs:', results.usableFlops ? formatFLOPS(results.usableFlops) : 'N/A'],
-      ['Max Throughput:', results.maxThroughput ? `${results.maxThroughput.toFixed(1)} tokens/sec` : 'N/A'],
-      ['Max Users:', results.maxUsers ? results.maxUsers.toFixed(1) : 'N/A'],
-      ['Words per Second:', results.words ? `${results.words.toFixed(1)} words/sec` : 'N/A'],
-      ['', ''],
-      ['Tokens/sec per User:', results.tokensPerSecPerUser ? results.tokensPerSecPerUser.toFixed(1) : 'N/A'],
-      ['Total Overhead Multiplier:', results.totalOverheadMultiplier ? results.totalOverheadMultiplier.toFixed(2) : 'N/A'],
-      ['', ''],
-      ['Batch Efficiency:', results.batchEfficiency ? `${(results.batchEfficiency * 100).toFixed(1)}%` : 'N/A'],
-      ['Prefill Efficiency:', results.prefillEfficiency ? `${(results.prefillEfficiency * 100).toFixed(1)}%` : 'N/A'],
-      ['Token Generation Time:', results.tokenGenerationTime ? `${(results.tokenGenerationTime * 1e6).toFixed(1)} μs` : 'N/A'],
-      ['', ''],
-      ['Model Memory Footprint:', `${modelSizeGB.toFixed(1)} GB`],
+    const technicalCalculations: ReportSection[] = [
+      {
+        title: 'Technical Metrics',
+        items: [
+          ['Usable Analysis FLOPs', results.usableFlops ? formatFLOPS(results.usableFlops) : 'N/A'],
+          ['Effective Compute/GPU', results.effectiveFlopsPerGpu ? formatFLOPS(results.effectiveFlopsPerGpu) : 'N/A'],
+          ['Token Generation Latency', results.tokenGenerationTime ? `${(results.tokenGenerationTime * 1e6).toFixed(1)} μs` : 'N/A'],
+          ['---', '---'],
+          ['Model Footprint', `${modelSizeGB.toFixed(1)} GB`],
+          ['KV Cache Memory', results.vramAllocation?.kvCacheGB ? `${results.vramAllocation.kvCacheGB.toFixed(2)} GB` : '0 GB'],
+          ['Total Memory Used', results.vramAllocation?.totalUsedGB ? `${results.vramAllocation.totalUsedGB.toFixed(1)} GB` : 'N/A'],
+          ['Memory Bound', results.isMemoryBound ? 'Yes' : 'No'],
+        ]
+      }
     ];
 
-    if (results.throughputPerGpu !== undefined) {
-      metricsData.splice(4, 0, ['Throughput per GPU:', `${results.throughputPerGpu.toFixed(1)} tokens/sec`]);
-      metricsData.splice(5, 0, ['Users per GPU:', results.usersPerGpu ? results.usersPerGpu.toFixed(1) : 'N/A']);
-      metricsData.splice(6, 0, ['', '']);
-    }
+    const reportData: ReportData = {
+      reportType: 'Performance Analysis',
+      modelName: `${effectiveModelParams.toFixed(1)}B Model`,
+      hardwareName: hardwareLabel,
+      date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      preparedFor: 'Technical Assessment Team',
+      sections: [...sections, performanceSection],
+      calculations: technicalCalculations,
+      summary: `This ${effectiveModelParams.toFixed(1)}B parameter model running on ${hardwareLabel} can support ${results.maxUsers ? results.maxUsers.toFixed(1) : 'N/A'} concurrent users with ${results.maxThroughput ? results.maxThroughput.toFixed(1) : 'N/A'} tokens/sec aggregate throughput. Serving efficiency includes ${(results.batchEfficiency * 100).toFixed(1)}% batch efficiency and ${(results.prefillEfficiency * 100).toFixed(1)}% prefill efficiency.`
+    };
 
-    if (results.vramAllocation && results.vramAllocation.kvCacheGB > 0) {
-      metricsData.push(['KV Cache Memory:', `${results.vramAllocation.kvCacheGB.toFixed(2)} GB`]);
-      metricsData.push([`Total ${memoryLabel} Used:`, `${results.vramAllocation.totalUsedGB.toFixed(1)} GB`]);
-    }
-
-    metricsData.push(
-      [`Available ${memoryLabel}:`, `${selectedHW?.memory || 'N/A'} GB`],
-      ['Memory Bound:', results.isMemoryBound ? 'Yes' : 'No'],
-    );
-
-    if (results.prefillOverhead > 0) {
-      metricsData.push(['Prefill Overhead:', `${(results.prefillOverhead * 100).toFixed(1)}%`]);
-    }
-
-    if (results.attentionOverhead > 0) {
-      metricsData.push(['Attention Overhead:', `${(results.attentionOverhead * 100).toFixed(1)}%`]);
-    }
-
-    metricsData.forEach(([label, value]) => {
-      if (label === '') {
-        yPos += 3;
-        return;
-      }
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(label, leftMargin, yPos);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(value, leftMargin + 70, yPos);
-      yPos += lineHeight;
-    });
-
-    yPos += 5;
-
-    // Section: Summary
-    pdf.setFillColor(100, 116, 139);
-    pdf.rect(leftMargin - 5, yPos - 5, 170, 10, 'F');
-    pdf.setTextColor(255, 255, 255);
-    pdf.setFontSize(14);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('SUMMARY', leftMargin, yPos);
-    yPos += 12;
-
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(11);
-    pdf.setFont('helvetica', 'normal');
-
-    const summaryText = `This ${parseFloat(inputs.model).toFixed(1)}B parameter model running on ${selectedHW?.name || 'selected hardware'} ` +
-      `can support ${results.maxUsers ? results.maxUsers.toFixed(1) : 'N/A'} concurrent users with ${results.maxThroughput ? results.maxThroughput.toFixed(1) : 'N/A'} tokens/sec throughput ` +
-      `(${results.words ? results.words.toFixed(1) : 'N/A'} words/sec). Each user receives ${results.tokensPerSecPerUser ? results.tokensPerSecPerUser.toFixed(1) : 'N/A'} tokens/sec ` +
-      `with a ${inputs.thinkTime}s think time between requests. The system provides ${results.usableFlops ? formatFLOPS(results.usableFlops) : 'N/A'} of usable FLOPs ` +
-      `after accounting for all overhead factors. Serving efficiency includes ${results.batchEfficiency ? (results.batchEfficiency * 100).toFixed(1) : 'N/A'}% batch efficiency ` +
-      `and ${results.prefillEfficiency ? (results.prefillEfficiency * 100).toFixed(1) : 'N/A'}% prefill efficiency for realistic online serving.`;
-
-    const splitText = pdf.splitTextToSize(summaryText, 170);
-    splitText.forEach((line: string) => {
-      pdf.text(line, leftMargin, yPos);
-      yPos += lineHeight;
-    });
-
-    // Footer
-    pdf.setFontSize(9);
-    pdf.setTextColor(100, 116, 139);
-    pdf.text('Generated by LLM Infrastructure Calculator', leftMargin, 275);
-    pdf.text(`Report ID: PERF-${Date.now()}`, leftMargin, 280);
-    pdf.text('© 2025 Finovate Team. All rights reserved.', leftMargin, 285);
-
-    pdf.save(`Infrastructure-Performance-Report-${Date.now()}.pdf`);
+    await generateInfrastructureReport(reportData);
   } catch (error) {
     console.error('Error generating PDF:', error);
-    alert('Failed to generate PDF. Please try again.');
+    alert('Failed to generate PDF report.');
   }
 }
 
